@@ -27,3 +27,28 @@ Na prática:
 • Camada Domain = regras e tipos centrais<br>
 • Camadas Generation/Infrastructure = execução real
 <br><br>
+Stack do projeto:
+<br><br>
+• ASP.NET Core<br>
+• .NET 10<br>
+• Kiota CLI<br>
+• filesystem local<br>
+• zip packaging<br>
+• Razor Pages
+<br><br>
+O projeto segue as seguintes definições por camadas:
+<br><br>
+Camadas centrais<br>
+• Shared<br>
+• Domain
+<br><br>
+Camada de orquestração<br>
+• Application
+<br><br>
+Camadas de implementação<br>
+• Generation<br>
+• Infrastructure
+<br><br>
+Camada de entrada<br>
+• Web
+<br><br>
