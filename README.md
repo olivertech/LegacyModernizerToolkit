@@ -18,3 +18,11 @@ O que o toolkit entrega:
 <br><br>
 4 - Entrega um projeto base pronto para uso
 <br><br>
+Esse projeto adota o padrão de arquitetura "Clean Architecture" simplificada.
+<br><br>
+Na prática:
+<br><br>
+• Camada Web = entrada
+• Camada Application = orquestração
+• Camada Domain = regras e tipos centrais
+• Camadas Generation/Infrastructure = execução real
