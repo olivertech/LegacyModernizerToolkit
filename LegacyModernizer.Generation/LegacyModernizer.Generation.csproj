@@ -15,6 +15,7 @@
   <ItemGroup>
     <Folder Include="Kiota\" />
     <Folder Include="Composition\" />
+    <Folder Include="DependencyInjection\" />
     <Folder Include="Scaffolding\" />
     <Folder Include="Parsing\" />
     <Folder Include="Templates\" />

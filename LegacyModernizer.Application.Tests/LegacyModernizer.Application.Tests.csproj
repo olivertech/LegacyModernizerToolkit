@@ -18,4 +18,10 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Mappings\" />
+    <Folder Include="Validators\" />
+    <Folder Include="UseCases\" />
+  </ItemGroup>
+
 </Project>

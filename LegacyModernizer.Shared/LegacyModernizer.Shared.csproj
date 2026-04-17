@@ -9,6 +9,8 @@
   <ItemGroup>
     <Folder Include="Helpers\" />
     <Folder Include="Enums\" />
+    <Folder Include="Errors\" />
+    <Folder Include="Constants\" />
   </ItemGroup>
 
 </Project>

@@ -11,4 +11,14 @@
     <ProjectReference Include="..\LegacyModernizer.Shared\LegacyModernizer.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Contracts\" />
+    <Folder Include="DTOs\Commons\" />
+    <Folder Include="DTOs\Responses\" />
+    <Folder Include="DTOs\Requests\" />
+    <Folder Include="Mappings\" />
+    <Folder Include="DependencyInjections\" />
+    <Folder Include="UseCases\" />
+  </ItemGroup>
+
 </Project>
