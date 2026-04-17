@@ -22,7 +22,8 @@ Esse projeto adota o padrão de arquitetura "Clean Architecture" simplificada.
 <br><br>
 Na prática:
 <br><br>
-• Camada Web = entrada
-• Camada Application = orquestração
-• Camada Domain = regras e tipos centrais
+• Camada Web = entrada<br>
+• Camada Application = orquestração<br>
+• Camada Domain = regras e tipos centrais<br>
 • Camadas Generation/Infrastructure = execução real
+<br><br>
