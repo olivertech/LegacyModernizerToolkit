@@ -1,0 +1,29 @@
+<Solution>
+  <Folder Name="/1-LegacyModernizer.Web/">
+    <Project Path="LegacyModernizer.Web/LegacyModernizer.Web.csproj" Id="24808a1c-7222-440f-9beb-6f31d0abe1a7" />
+  </Folder>
+  <Folder Name="/2-LegacyModernizer.Application/">
+    <Project Path="LegacyModernizer.Application/LegacyModernizer.Application.csproj" Id="46505cbb-1592-45ff-83a0-03f1e8979eeb" />
+  </Folder>
+  <Folder Name="/3-LegacyModernizer.Domain/">
+    <Project Path="LegacyModernizer.Domain/LegacyModernizer.Domain.csproj" Id="936d4530-2c3d-419a-be48-2c11667d8675" />
+  </Folder>
+  <Folder Name="/4-LegacyModernizer.Generation/">
+    <Project Path="LegacyModernizer.Generation/LegacyModernizer.Generation.csproj" Id="9f7a514a-5d35-48f4-9062-b3c4d0283a89" />
+  </Folder>
+  <Folder Name="/5-LegacyModernizer.Infrastructure/">
+    <Project Path="LegacyModernizer.Infrastructure/LegacyModernizer.Infrastructure.csproj" Id="46f5ca8e-7c35-4003-acbc-6641718aea0a" />
+  </Folder>
+  <Folder Name="/6-LegacyModernizer.Shared/">
+    <Project Path="LegacyModernizer.Shared/LegacyModernizer.Shared.csproj" Id="de5a7773-94ea-44b8-ad92-b5d721ccd6ec" />
+  </Folder>
+  <Folder Name="/7-LegacyModernizer.Application.Tests/">
+    <Project Path="LegacyModernizer.Application.Tests/LegacyModernizer.Application.Tests.csproj" Id="239c49fa-0af6-4101-bf13-8ca18f9a5665" />
+  </Folder>
+  <Folder Name="/8-LegacyModernizer.Generation.Tests/">
+    <Project Path="LegacyModernizer.Generation.Tests/LegacyModernizer.Generation.Tests.csproj" Id="e4cb1593-824b-439f-bfc1-8ef3d48dba8c" />
+  </Folder>
+  <Folder Name="/9-LegacyModernizer.Infrastructure.Tests/">
+    <Project Path="LegacyModernizer.Infrastructure.Tests/LegacyModernizer.Infrastructure.Tests.csproj" Id="a26836eb-d644-42f3-96ee-72101cf1d621" />
+  </Folder>
+</Solution>

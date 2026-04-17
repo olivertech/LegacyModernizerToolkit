@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LegacyModernizer.Application\LegacyModernizer.Application.csproj" />
+    <ProjectReference Include="..\LegacyModernizer.Generation\LegacyModernizer.Generation.csproj" />
+    <ProjectReference Include="..\LegacyModernizer.Infrastructure\LegacyModernizer.Infrastructure.csproj" />
+    <ProjectReference Include="..\LegacyModernizer.Shared\LegacyModernizer.Shared.csproj" />
+  </ItemGroup>
+
+</Project>
