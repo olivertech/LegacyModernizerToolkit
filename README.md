@@ -11,9 +11,9 @@ O que o toolkit entrega:
     • Facade<br>
     • DTOs organizados
 <br><br>
-3 - Aplica boas práticas automaticamente:
-    • separação de responsabilidades
-    • centralização de chamadas
+3 - Aplica boas práticas automaticamente:<br>
+    • separação de responsabilidades<br>
+    • centralização de chamadas<br>
     • estrutura pronta para DI
 <br><br>
 4 - Entrega um projeto base pronto para uso
