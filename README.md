@@ -38,7 +38,7 @@ Stack do projeto:
 <br><br>
 O projeto segue as seguintes definições por camadas:
 <br><br>
-Camadas centrais - Domain
+Camada central - Domain
 <br><br>
     • representar os conceitos centrais do processo<br>
     • sustentar regras de estado e consistência
