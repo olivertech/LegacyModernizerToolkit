@@ -42,13 +42,33 @@ Camadas centrais<br>
 • Shared<br>
 • Domain
 <br><br>
+    • representar os conceitos centrais do processo<br>
+    • sustentar regras de estado e consistência
+<br><br>
 Camada de orquestração<br>
 • Application
 <br><br>
+    • orquestrar o fluxo inteiro<br>
+    • validar o request de uso<br>
+    • chamar os serviços necessários<br>
+    • montar a resposta final
+<br><br>
 Camadas de implementação<br>
-• Generation<br>
+• Generation
+<br><br>
+    • executar a geração e composição estrutural
+<br><br>
 • Infrastructure
+<br><br>
+    • baixar spec<br>
+    • criar diretórios<br>
+    • executar processos externos<br>
+    • zipar arquivos
 <br><br>
 Camada de entrada<br>
 • Web
+<br><br>
+    • receber a URL e dados do formulário<br>
+    • disparar a operação<br>
+    • exibir resultado
 <br><br>
