@@ -12,4 +12,12 @@
     <ProjectReference Include="..\LegacyModernizer.Shared\LegacyModernizer.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Kiota\" />
+    <Folder Include="Composition\" />
+    <Folder Include="Scaffolding\" />
+    <Folder Include="Parsing\" />
+    <Folder Include="Templates\" />
+  </ItemGroup>
+
 </Project>
