@@ -1,7 +1,6 @@
 Descrição do projeto
 <br><br>
-Uma ferramenta para acelerar a modernização de APIs legadas em .NET, padronizando consumo, reduzindo acoplamento e melhorando arquitetura.<br>
-Ou seja, é gerar uma solução .NET modernizada, a partir de uma spec Swagger/OpenAPI.
+Uma ferramenta para acelerar a modernização de APIs legadas em .NET, padronizando consumo, reduzindo acoplamento e melhorando arquitetura. Ou seja, é gerar uma solução .NET modernizada, a partir de uma spec Swagger/OpenAPI.
 <br><br>
 O que o toolkit entrega:
 <br><br>
