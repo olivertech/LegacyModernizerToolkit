@@ -38,35 +38,30 @@ Stack do projeto:
 <br><br>
 O projeto segue as seguintes definições por camadas:
 <br><br>
-Camadas centrais<br>
-• Shared<br>
-• Domain
+Camadas centrais - Domain
 <br><br>
     • representar os conceitos centrais do processo<br>
     • sustentar regras de estado e consistência
 <br><br>
-Camada de orquestração<br>
-• Application
+Camada de orquestração - Application
 <br><br>
     • orquestrar o fluxo inteiro<br>
     • validar o request de uso<br>
     • chamar os serviços necessários<br>
     • montar a resposta final
 <br><br>
-Camadas de implementação<br>
-• Generation
+Camada de implementação 1 - Generation
 <br><br>
     • executar a geração e composição estrutural
 <br><br>
-• Infrastructure
+Camada de implementação 2 - Infrastructure
 <br><br>
     • baixar spec<br>
     • criar diretórios<br>
     • executar processos externos<br>
     • zipar arquivos
 <br><br>
-Camada de entrada<br>
-• Web
+Camada de entrada - Web
 <br><br>
     • receber a URL e dados do formulário<br>
     • disparar a operação<br>
