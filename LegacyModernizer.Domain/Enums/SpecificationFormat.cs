@@ -4,5 +4,6 @@ public enum SpecificationFormat
 {
     Json,
     Yaml,
-    Xml
+    Xml,
+    Unknown
 }
