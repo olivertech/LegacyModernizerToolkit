@@ -17,7 +17,6 @@
     <Folder Include="Http\" />
     <Folder Include="DependencyInjection\" />
     <Folder Include="Options\" />
-    <Folder Include="Workspace\" />
     <Folder Include="Packaging\" />
     <Folder Include="ProcessExecution\" />
   </ItemGroup>

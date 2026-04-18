@@ -1,5 +1,5 @@
-﻿//Project namespaces
+﻿// Global using directives for the domain layer
 global using LegacyModernizer.Domain.Enums;
 global using LegacyModernizer.Domain.ValueObjects;
-//.Net namespaces
+// .NET namespaces
 global using System.Text.RegularExpressions;
