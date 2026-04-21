@@ -16,7 +16,6 @@
     <Folder Include="FileSystem\" />
     <Folder Include="Options\" />
     <Folder Include="Packaging\" />
-    <Folder Include="ProcessExecution\" />
   </ItemGroup>
 
   <ItemGroup>

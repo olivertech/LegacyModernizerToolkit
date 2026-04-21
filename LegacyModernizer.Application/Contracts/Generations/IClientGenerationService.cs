@@ -2,7 +2,8 @@
 
 public interface IClientGenerationService
 {
-    Task<GeneratedArtifact> GenerateAsync(ApiSpecification specification,
+    Task<GeneratedArtifact> GenerateAsync(ModernizationRequest request,
+                                          ApiSpecification specification,
                                           Workspace workspace,
                                           CancellationToken cancellationToken = default);
 }

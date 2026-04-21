@@ -109,7 +109,7 @@ public sealed class GenerateModernizedClientUseCase : IGenerateModernizedClientU
             // ao cliente.
             // ===========================================================================================================================
             execution.AdvanceToStep(ExecutionStep.ClientGeneration);
-            var generatedClientArtifact = await _clientGenerationService.GenerateAsync(specification, workspace, cancellationToken);
+            var generatedClientArtifact = await _clientGenerationService.GenerateAsync(modernizationRequest, specification, workspace, cancellationToken);
             execution.AddArtifact(generatedClientArtifact);
 
             // ===========================================================================================================================

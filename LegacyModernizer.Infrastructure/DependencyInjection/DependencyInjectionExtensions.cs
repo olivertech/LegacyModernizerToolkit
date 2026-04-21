@@ -1,4 +1,6 @@
-﻿namespace LegacyModernizer.Infrastructure.DependencyInjection
+﻿using LegacyModernizer.Infrastructure.ProcessExecution;
+
+namespace LegacyModernizer.Infrastructure.DependencyInjection
 {
     public static class DependencyInjectionExtensions
     {
@@ -9,6 +11,9 @@
 
             // Specification Acquisition
             services.AddHttpClient<ISpecificationAcquisitionService, SpecificationAcquisitionService>();
+
+            // Kiota Runner
+            services.AddScoped<IKiotaRunner, KiotaRunner>();
 
             return services;
         }

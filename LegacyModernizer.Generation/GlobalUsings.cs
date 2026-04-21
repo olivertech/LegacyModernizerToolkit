@@ -3,7 +3,8 @@ global using LegacyModernizer.Application.Contracts.Generations;
 global using LegacyModernizer.Domain.Entities;
 global using LegacyModernizer.Domain.Enums;
 global using LegacyModernizer.Generation.Parsing;
+global using LegacyModernizer.Domain.ValueObjects;
 // System namespaces
 global using System.Text.Json;
 global using Microsoft.Extensions.DependencyInjection;
-
+global using System.Diagnostics;
