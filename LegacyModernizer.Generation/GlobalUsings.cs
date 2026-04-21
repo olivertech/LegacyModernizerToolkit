@@ -1,0 +1,9 @@
+﻿// Global using directives for the LegacyModernizer.Generation project
+global using LegacyModernizer.Application.Contracts.Generations;
+global using LegacyModernizer.Domain.Entities;
+global using LegacyModernizer.Domain.Enums;
+global using LegacyModernizer.Generation.Parsing;
+// System namespaces
+global using System.Text.Json;
+global using Microsoft.Extensions.DependencyInjection;
+
