@@ -48,6 +48,7 @@
             await File.WriteAllTextAsync(localPath, content, cancellationToken);
 
             var specification = new ApiSpecification(source);
+            specification.SetFormat(format);
             specification.SetLocalPath(localPath);
 
             return specification;
@@ -61,6 +62,12 @@
                 return SpecificationFormat.Yaml;
             }
 
+            if (sourceValue.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                return SpecificationFormat.Json;
+            }
+
+            // fallback
             return SpecificationFormat.Json;
         }
     }

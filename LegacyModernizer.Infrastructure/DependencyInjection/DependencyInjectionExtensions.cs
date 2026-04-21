@@ -1,21 +1,21 @@
-﻿using LegacyModernizer.Infrastructure.ProcessExecution;
+﻿namespace LegacyModernizer.Infrastructure.DependencyInjection;
 
-namespace LegacyModernizer.Infrastructure.DependencyInjection
+public static class DependencyInjectionExtensions
 {
-    public static class DependencyInjectionExtensions
+    public static IServiceCollection AddInfrastructure(this IServiceCollection services)
     {
-        public static IServiceCollection AddInfrastructure(this IServiceCollection services)
-        {
-            // Workspace
-            services.AddScoped<IWorkspacePreparationService, WorkspacePreparationService>();
+        // Workspace
+        services.AddScoped<IWorkspacePreparationService, WorkspacePreparationService>();
 
-            // Specification Acquisition
-            services.AddHttpClient<ISpecificationAcquisitionService, SpecificationAcquisitionService>();
+        // Specification Acquisition
+        services.AddHttpClient<ISpecificationAcquisitionService, SpecificationAcquisitionService>();
 
-            // Kiota Runner
-            services.AddScoped<IKiotaRunner, KiotaRunner>();
+        // Kiota Runner
+        services.AddScoped<IKiotaRunner, KiotaRunner>();
 
-            return services;
-        }
+        // Packaging
+        services.AddScoped<IPackageGenerationService, PackageGenerationService>();
+
+        return services;
     }
 }

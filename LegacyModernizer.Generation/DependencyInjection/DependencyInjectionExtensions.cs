@@ -1,15 +1,13 @@
-﻿using LegacyModernizer.Generation.Kiota;
+﻿namespace LegacyModernizer.Generation.DependencyInjection;
 
-namespace LegacyModernizer.Generation.DependencyInjection
+public static class DependencyInjectionExtensions
 {
-    public static class DependencyInjectionExtensions
+    public static IServiceCollection AddGeneration(this IServiceCollection services)
     {
-        public static IServiceCollection AddGeneration(this IServiceCollection services)
-        {
-            services.AddScoped<ISpecificationValidationService, SpecificationValidationService>();
-            services.AddScoped<IClientGenerationService, ClientGenerationService>();
+        services.AddScoped<ISpecificationValidationService, SpecificationValidationService>();
+        services.AddScoped<IClientGenerationService, ClientGenerationService>();
+        services.AddScoped<ISolutionCompositionService, SolutionCompositionService>();
 
-            return services;
-        }
+        return services;
     }
 }

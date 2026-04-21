@@ -1,0 +1,47 @@
+﻿@model LegacyModernizer.Web.ViewModels.GenerateModernizedClientResultViewModel
+
+@{
+    ViewData["Title"] = "Generation Result";
+}
+
+<h1>Generation Result</h1>
+
+@if (Model.Success)
+{
+    <div class="alert alert-success">
+        <strong>Success:</strong> @Model.Message
+    </div>
+
+    <dl class="row">
+        <dt class="col-sm-3">Execution Id</dt>
+        <dd class="col-sm-9">@Model.ExecutionId</dd>
+
+        <dt class="col-sm-3">Solution Root Path</dt>
+        <dd class="col-sm-9">@Model.SolutionRootPath</dd>
+
+        <dt class="col-sm-3">Package Path</dt>
+        <dd class="col-sm-9">@Model.PackagePath</dd>
+    </dl>
+
+    @if (!string.IsNullOrWhiteSpace(Model.DownloadToken))
+    {
+        <a asp-action="Download"
+           asp-route-token="@Model.DownloadToken"
+           class="btn btn-success">
+            Download ZIP
+        </a>
+    }
+}
+else
+{
+    <div class="alert alert-danger">
+        <strong>Error:</strong> @Model.Message
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.ExecutionId))
+    {
+        <p><strong>Execution Id:</strong> @Model.ExecutionId</p>
+    }
+}
+
+<a asp-action="Index" class="btn btn-secondary mt-3">Back</a>

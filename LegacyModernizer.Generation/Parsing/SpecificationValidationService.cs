@@ -1,86 +1,85 @@
-﻿namespace LegacyModernizer.Generation.Parsing
+﻿namespace LegacyModernizer.Generation.Parsing;
+
+public sealed class SpecificationValidationService : ISpecificationValidationService
 {
-    public sealed class SpecificationValidationService : ISpecificationValidationService
+    public async Task<ApiSpecification> ValidateAsync(ApiSpecification specification,
+                                                      CancellationToken cancellationToken = default)
     {
-        public async Task<ApiSpecification> ValidateAsync(ApiSpecification specification,
-                                                          CancellationToken cancellationToken = default)
+        if (specification is null)
+            throw new ArgumentNullException(nameof(specification));
+
+        if (string.IsNullOrWhiteSpace(specification.LocalPath))
+            throw new InvalidOperationException("Specification local path was not defined.");
+
+        if (!File.Exists(specification.LocalPath))
+            throw new FileNotFoundException("Specification file was not found.", specification.LocalPath);
+
+        var content = await File.ReadAllTextAsync(specification.LocalPath, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(content))
         {
-            if (specification is null)
-                throw new ArgumentNullException(nameof(specification));
-
-            if (string.IsNullOrWhiteSpace(specification.LocalPath))
-                throw new InvalidOperationException("Specification local path was not defined.");
-
-            if (!File.Exists(specification.LocalPath))
-                throw new FileNotFoundException("Specification file was not found.", specification.LocalPath);
-
-            var content = await File.ReadAllTextAsync(specification.LocalPath, cancellationToken);
-
-            if (string.IsNullOrWhiteSpace(content))
-            {
-                specification.MarkValidationStatusAsInvalid();
-                throw new InvalidOperationException("Specification content is empty.");
-            }
-
-            var isValid = specification.Format switch
-            {
-                SpecificationFormat.Json => ValidateJson(content),
-                SpecificationFormat.Yaml => ValidateYaml(content),
-                _ => false
-            };
-
-            if (!isValid)
-            {
-                specification.MarkValidationStatusAsInvalid();
-                throw new InvalidOperationException("The specification is not a valid OpenAPI/Swagger document.");
-            }
-
-            specification.MarkValidationStatusAsValid();
-            return specification;
+            specification.MarkValidationStatusAsInvalid();
+            throw new InvalidOperationException("Specification content is empty.");
         }
 
-        private static bool ValidateJson(string content)
+        var isValid = specification.Format switch
         {
-            try
-            {
-                using var document = JsonDocument.Parse(content);
+            SpecificationFormat.Json => ValidateJson(content),
+            SpecificationFormat.Yaml => ValidateYaml(content),
+            _ => false
+        };
 
-                var root = document.RootElement;
+        if (!isValid)
+        {
+            specification.MarkValidationStatusAsInvalid();
+            throw new InvalidOperationException("The specification is not a valid OpenAPI/Swagger document.");
+        }
 
-                if (root.ValueKind != JsonValueKind.Object)
-                    return false;
+        specification.MarkValidationStatusAsValid();
+        return specification;
+    }
 
-                /*
-                 * FORMATOS OPENAPI/Swagger:
-                 * 
-                 * {
-                 *     "openapi": "3.0.1",
-                 *     ...
-                 * }
-                 * 
-                 * {
-                 *    "swagger": "2.0",
-                 *   ...
-                 * }
-                 * 
-                */
+    private static bool ValidateJson(string content)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(content);
 
-                return root.TryGetProperty("openapi", out _) ||
-                       root.TryGetProperty("swagger", out _);
-            }
-            catch (JsonException)
-            {
+            var root = document.RootElement;
+
+            if (root.ValueKind != JsonValueKind.Object)
                 return false;
-            }
-        }
 
-        private static bool ValidateYaml(string content)
+            /*
+             * FORMATOS OPENAPI/Swagger:
+             * 
+             * {
+             *     "openapi": "3.0.1",
+             *     ...
+             * }
+             * 
+             * {
+             *    "swagger": "2.0",
+             *   ...
+             * }
+             * 
+            */
+
+            return root.TryGetProperty("openapi", out _) ||
+                   root.TryGetProperty("swagger", out _);
+        }
+        catch (JsonException)
         {
-            var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-            return lines.Any(line =>
-                line.StartsWith("openapi:", StringComparison.OrdinalIgnoreCase) ||
-                line.StartsWith("swagger:", StringComparison.OrdinalIgnoreCase));
+            return false;
         }
+    }
+
+    private static bool ValidateYaml(string content)
+    {
+        var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        return lines.Any(line =>
+            line.StartsWith("openapi:", StringComparison.OrdinalIgnoreCase) ||
+            line.StartsWith("swagger:", StringComparison.OrdinalIgnoreCase));
     }
 }

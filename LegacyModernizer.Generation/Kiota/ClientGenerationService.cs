@@ -1,6 +1,4 @@
-﻿using LegacyModernizer.Application.Contracts.Generations.Models;
-
-namespace LegacyModernizer.Generation.Kiota;
+﻿namespace LegacyModernizer.Generation.Kiota;
 
 public sealed class ClientGenerationService : IClientGenerationService
 {

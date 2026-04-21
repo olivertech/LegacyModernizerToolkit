@@ -1,8 +1,36 @@
-﻿@{
-    ViewData["Title"] = "Home Page";
+﻿@model LegacyModernizer.Web.ViewModels.GenerateModernizedClientViewModel
+
+@{
+    ViewData["Title"] = "Legacy Modernizer Toolkit";
 }
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
-</div>
+<h1>Legacy Modernizer Toolkit</h1>
+<p>Generate a modernized .NET solution from an OpenAPI/Swagger URL.</p>
+
+<form asp-action="Index" method="post">
+    @Html.AntiForgeryToken()
+
+    <div class="mb-3">
+        <label asp-for="SpecificationUrl" class="form-label"></label>
+        <input asp-for="SpecificationUrl" class="form-control" />
+        <span asp-validation-for="SpecificationUrl" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="ProjectName" class="form-label"></label>
+        <input asp-for="ProjectName" class="form-control" />
+        <span asp-validation-for="ProjectName" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="BaseNamespace" class="form-label"></label>
+        <input asp-for="BaseNamespace" class="form-control" />
+        <span asp-validation-for="BaseNamespace" class="text-danger"></span>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Generate Solution</button>
+</form>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}
