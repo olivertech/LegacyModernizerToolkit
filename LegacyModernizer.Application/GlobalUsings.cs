@@ -10,5 +10,6 @@ global using LegacyModernizer.Application.Contracts.Services;
 global using LegacyModernizer.Domain.Enums;
 global using LegacyModernizer.Application.UseCases;
 global using LegacyModernizer.Application.Contracts.Generations.Models;
+global using LegacyModernizer.Application.DTOs.Commons;
 // .NET namespaces
 global using Microsoft.Extensions.DependencyInjection;

@@ -5,25 +5,31 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
     /*
      * Saída esperada da composição:
      * 
-     * {ProjectName}/
-     *     {ProjectName}.sln
-     *     README.md
-     *     src/
-     *     {ProjectName}.ApiClient/
-     *         ... arquivos Kiota ...
-     *     {ProjectName}.Core/
-     *         Interfaces/
-     *           IApiFacade.cs                      -> Contrato da facade
-     *           IGeneratedApiService.cs            -> Contrato do serviço base
-     *         Models/
-     *             ApiOptions.cs                    -> Configuração base
-     *     {ProjectName}.Infrastructure/
-     *         Facades/
-     *             ApiFacade.cs                     -> Orquestra o IGeneratedApiService
-     *         Services/
-     *             GeneratedApiService.cs           -> Implementação que conhece o cliente Kiota gerado
-     *         DependencyInjection/
-     *             ServiceCollectionExtensions.cs   -> Registra todas as injeções de dependência
+     *{ProjectName}/
+     * {ProjectName}.sln
+     * README.md
+     * src/
+     *   {ProjectName}.ApiClient/
+     *     ...arquivos Kiota...
+     *   {ProjectName}.Core/
+     *     Interfaces/
+     *       IApiFacade.cs
+     *       IAuthService.cs
+     *       IHomeService.cs
+     *       IProfileService.cs 
+     *       ...
+     *     Models/
+     *       ApiOptions.cs
+     *   {ProjectName}.Infrastructure/
+     *     Services/
+     *       AuthService.cs
+     *       HomeService.cs
+     *       ProfileService.cs 
+     *       ...
+     *     Facades/
+     *       ApiFacade.cs
+     *     DependencyInjection/
+     *       ServiceCollectionExtensions.cs
      * 
      * O serviço de composição é responsável por criar a estrutura de pastas e arquivos necessários para a solução modernizada.
      * Ele deve validar os inputs, garantir que o workspace esteja preparado, e organizar os artefatos gerados de forma coerente.
@@ -32,6 +38,7 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
     public Task<ModernizedSolution> ComposeAsync(ModernizationRequest request,
                                                  Workspace workspace,
                                                  GeneratedArtifact generatedClientArtifact,
+                                                 IReadOnlyCollection<ApiGroupDefinition> groups,
                                                  CancellationToken cancellationToken = default)
     {
         if (request is null)
@@ -42,6 +49,9 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
         if (generatedClientArtifact is null)
             throw new ArgumentNullException(nameof(generatedClientArtifact));
+
+        if (groups is null)
+            throw new ArgumentNullException(nameof(groups));
 
         if (!workspace.IsPrepared)
             throw new InvalidOperationException("Workspace must be prepared before solution composition.");
@@ -57,6 +67,13 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         var projectName = request.ProjectName.ToString();
         var baseNamespace = request.BaseNamespace.ToString();
 
+        var normalizedGroups = groups
+            .Where(x => !string.IsNullOrWhiteSpace(x.Name))
+            .Select(x => x.Name.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToArray();
+
         var solutionRootPath = Path.Combine(workspace.Paths.ComposedPath, projectName);
         var srcPath = Path.Combine(solutionRootPath, "src");
 
@@ -67,8 +84,8 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         var coreInterfacesPath = Path.Combine(coreProjectPath, "Interfaces");
         var coreModelsPath = Path.Combine(coreProjectPath, "Models");
 
-        var infrastructureFacadesPath = Path.Combine(infrastructureProjectPath, "Facades");
         var infrastructureServicesPath = Path.Combine(infrastructureProjectPath, "Services");
+        var infrastructureFacadesPath = Path.Combine(infrastructureProjectPath, "Facades");
         var infrastructureDependencyInjectionPath = Path.Combine(infrastructureProjectPath, "DependencyInjection");
 
         Directory.CreateDirectory(solutionRootPath);
@@ -79,8 +96,8 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         Directory.CreateDirectory(coreModelsPath);
 
         Directory.CreateDirectory(infrastructureProjectPath);
-        Directory.CreateDirectory(infrastructureFacadesPath);
         Directory.CreateDirectory(infrastructureServicesPath);
+        Directory.CreateDirectory(infrastructureFacadesPath);
         Directory.CreateDirectory(infrastructureDependencyInjectionPath);
 
         CopyDirectory(generatedClientPath, apiClientProjectPath);
@@ -89,12 +106,17 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         CreatePlaceholderSolutionFile(solutionFilePath, projectName);
 
         CreateApiOptionsFile(coreModelsPath, baseNamespace);
-        CreateGeneratedApiServiceInterfaceFile(coreInterfacesPath, baseNamespace);
-        CreateApiFacadeInterfaceFile(coreInterfacesPath, baseNamespace);
-        CreateGeneratedApiServiceFile(infrastructureServicesPath, baseNamespace);
-        CreateApiFacadeFile(infrastructureFacadesPath, baseNamespace);
-        CreateServiceCollectionExtensionsFile(infrastructureDependencyInjectionPath, baseNamespace);
-        CreateReadmeFile(solutionRootPath, request);
+
+        foreach (var groupName in normalizedGroups)
+        {
+            CreateGroupInterfaceFile(coreInterfacesPath, baseNamespace, groupName);
+            CreateGroupServiceFile(infrastructureServicesPath, baseNamespace, groupName);
+        }
+
+        CreateApiFacadeInterfaceFile(coreInterfacesPath, baseNamespace, normalizedGroups);
+        CreateApiFacadeFile(infrastructureFacadesPath, baseNamespace, normalizedGroups);
+        CreateServiceCollectionExtensionsFile(infrastructureDependencyInjectionPath, baseNamespace, normalizedGroups);
+        CreateReadmeFile(solutionRootPath, request, normalizedGroups);
 
         var solution = new ModernizedSolution(
             request.ProjectName,
@@ -132,12 +154,12 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
     private static void CreatePlaceholderSolutionFile(string solutionFilePath, string projectName)
     {
         var content =
-$"""
+$$"""
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 # Placeholder solution generated by Legacy Modernizer Toolkit
-# Project: {projectName}
-# Note: This solution structure is ready to evolve into a fully compilable multi-project solution.
+# Project: {{projectName}}
+# This structure is ready to evolve into a compilable multi-project solution.
 """;
 
         File.WriteAllText(solutionFilePath, content);
@@ -160,26 +182,52 @@ public sealed class ApiOptions
         File.WriteAllText(filePath, content);
     }
 
-    private static void CreateGeneratedApiServiceInterfaceFile(string coreInterfacesPath, string baseNamespace)
+    private static void CreateGroupInterfaceFile(string coreInterfacesPath, string baseNamespace, string groupName)
     {
-        var filePath = Path.Combine(coreInterfacesPath, "IGeneratedApiService.cs");
+        var filePath = Path.Combine(coreInterfacesPath, $"I{groupName}Service.cs");
 
         var content =
 $$"""
 namespace {{baseNamespace}}.Core.Interfaces;
 
-public interface IGeneratedApiService
+public interface I{{groupName}}Service
 {
-    string BaseUrl { get; }
+    string GroupName { get; }
 }
 """;
 
         File.WriteAllText(filePath, content);
     }
 
-    private static void CreateApiFacadeInterfaceFile(string coreInterfacesPath, string baseNamespace)
+    private static void CreateGroupServiceFile(string infrastructureServicesPath, string baseNamespace, string groupName)
+    {
+        var filePath = Path.Combine(infrastructureServicesPath, $"{groupName}Service.cs");
+
+        var content =
+$$"""
+using {{baseNamespace}}.Core.Interfaces;
+
+namespace {{baseNamespace}}.Infrastructure.Services;
+
+public sealed class {{groupName}}Service : I{{groupName}}Service
+{
+    public string GroupName => "{{groupName}}";
+}
+""";
+
+        File.WriteAllText(filePath, content);
+    }
+
+    private static void CreateApiFacadeInterfaceFile(
+        string coreInterfacesPath,
+        string baseNamespace,
+        IReadOnlyCollection<string> groups)
     {
         var filePath = Path.Combine(coreInterfacesPath, "IApiFacade.cs");
+
+        var properties = groups.Count == 0
+            ? "    // No API groups were detected."
+            : string.Join(Environment.NewLine, groups.Select(g => $"    I{g}Service {g} {{ get; }}"));
 
         var content =
 $$"""
@@ -187,74 +235,89 @@ namespace {{baseNamespace}}.Core.Interfaces;
 
 public interface IApiFacade
 {
-    IGeneratedApiService GeneratedApi { get; }
+{{properties}}
 }
 """;
 
         File.WriteAllText(filePath, content);
     }
 
-    private static void CreateGeneratedApiServiceFile(string infrastructureServicesPath, string baseNamespace)
-    {
-        var filePath = Path.Combine(infrastructureServicesPath, "GeneratedApiService.cs");
-
-        var content =
-$$"""
-using {{baseNamespace}}.Core.Interfaces;
-using {{baseNamespace}}.Core.Models;
-
-namespace {{baseNamespace}}.Infrastructure.Services;
-
-public sealed class GeneratedApiService : IGeneratedApiService
-{
-    private readonly ApiOptions _options;
-
-    public GeneratedApiService(ApiOptions options)
-    {
-        _options = options ?? throw new ArgumentNullException(nameof(options));
-    }
-
-    public string BaseUrl => _options.BaseUrl;
-}
-""";
-
-        File.WriteAllText(filePath, content);
-    }
-
-    private static void CreateApiFacadeFile(string infrastructureFacadesPath, string baseNamespace)
+    private static void CreateApiFacadeFile(
+        string infrastructureFacadesPath,
+        string baseNamespace,
+        IReadOnlyCollection<string> groups)
     {
         var filePath = Path.Combine(infrastructureFacadesPath, "ApiFacade.cs");
 
+        var usingBlock = $"{baseNamespace}.Core.Interfaces";
+
+        var constructorParameters = groups.Count == 0
+            ? string.Empty
+            : string.Join("," + Environment.NewLine, groups.Select(g => $"        I{g}Service {ToCamelCase(g)}"));
+
+        var assignments = groups.Count == 0
+            ? "        // No API groups were detected."
+            : string.Join(Environment.NewLine, groups.Select(g => $"        {g} = {ToCamelCase(g)} ?? throw new ArgumentNullException(nameof({ToCamelCase(g)}));"));
+
+        var properties = groups.Count == 0
+            ? "    // No API groups were detected."
+            : string.Join(Environment.NewLine + Environment.NewLine, groups.Select(g => $"    public I{g}Service {g} {{ get; }}"));
+
+        var constructorBlock = groups.Count == 0
+            ? """
+    public ApiFacade()
+    {
+        // No API groups were detected.
+    }
+"""
+            :
+$$"""
+    public ApiFacade(
+{{constructorParameters}})
+    {
+{{assignments}}
+    }
+""";
+
         var content =
 $$"""
-using {{baseNamespace}}.Core.Interfaces;
+using {{usingBlock}};
 
 namespace {{baseNamespace}}.Infrastructure.Facades;
 
 public sealed class ApiFacade : IApiFacade
 {
-    public ApiFacade(IGeneratedApiService generatedApi)
-    {
-        GeneratedApi = generatedApi ?? throw new ArgumentNullException(nameof(generatedApi));
-    }
+{{constructorBlock}}
 
-    public IGeneratedApiService GeneratedApi { get; }
+{{properties}}
 }
 """;
 
         File.WriteAllText(filePath, content);
     }
 
-    private static void CreateServiceCollectionExtensionsFile(string infrastructureDependencyInjectionPath, string baseNamespace)
+    private static void CreateServiceCollectionExtensionsFile(
+        string infrastructureDependencyInjectionPath,
+        string baseNamespace,
+        IReadOnlyCollection<string> groups)
     {
         var filePath = Path.Combine(infrastructureDependencyInjectionPath, "ServiceCollectionExtensions.cs");
 
+        var interfaceUsings = $"{baseNamespace}.Core.Interfaces";
+        var modelUsings = $"{baseNamespace}.Core.Models";
+        var facadeUsings = $"{baseNamespace}.Infrastructure.Facades";
+        var serviceUsings = $"{baseNamespace}.Infrastructure.Services";
+
+        var registrations = groups.Count == 0
+            ? "        // No API groups were detected."
+            : string.Join(Environment.NewLine, groups.Select(g => $"        services.AddScoped<I{g}Service, {g}Service>();"));
+
         var content =
 $$"""
-using {{baseNamespace}}.Core.Interfaces;
-using {{baseNamespace}}.Core.Models;
-using {{baseNamespace}}.Infrastructure.Facades;
-using {{baseNamespace}}.Infrastructure.Services;
+using {{interfaceUsings}};
+using {{modelUsings}};
+using {{facadeUsings}};
+using {{serviceUsings}};
 using Microsoft.Extensions.DependencyInjection;
 
 namespace {{baseNamespace}}.Infrastructure.DependencyInjection;
@@ -273,7 +336,8 @@ public static class ServiceCollectionExtensions
         configure(options);
 
         services.AddSingleton(options);
-        services.AddScoped<IGeneratedApiService, GeneratedApiService>();
+
+{{registrations}}
         services.AddScoped<IApiFacade, ApiFacade>();
 
         return services;
@@ -284,10 +348,25 @@ public static class ServiceCollectionExtensions
         File.WriteAllText(filePath, content);
     }
 
-    private static void CreateReadmeFile(string solutionRootPath, ModernizationRequest request)
+    private static void CreateReadmeFile(
+        string solutionRootPath,
+        ModernizationRequest request,
+        IReadOnlyCollection<string> groups)
     {
         var projectName = request.ProjectName.ToString();
         var baseNamespace = request.BaseNamespace.ToString();
+
+        var groupsSection = groups.Count == 0
+            ? "- No API groups were detected during composition."
+            : string.Join(Environment.NewLine, groups.Select(g => $"- `{g}`"));
+
+        var serviceFilesSection = groups.Count == 0
+            ? "- No service files were generated."
+            : string.Join(Environment.NewLine, groups.Select(g => $"- `Services/{g}Service.cs`"));
+
+        var interfaceFilesSection = groups.Count == 0
+            ? "- No interface files were generated."
+            : string.Join(Environment.NewLine, groups.Select(g => $"- `Interfaces/I{g}Service.cs`"));
 
         var filePath = Path.Combine(solutionRootPath, "README.md");
 
@@ -302,10 +381,15 @@ This solution was generated by Legacy Modernizer Toolkit.
 This output represents a first modernization layer over an OpenAPI/Swagger specification, combining:
 
 - a generated API client
-- service abstractions
-- facade abstractions
+- service contracts grouped by API domain
+- service implementations grouped by API domain
+- a facade abstraction that aggregates the generated services
 - dependency injection bootstrap structure
-- a cleaner separation between generated code and author-owned code
+- separation between generated code and author-owned code
+
+## Detected API Groups
+
+{{groupsSection}}
 
 ## Structure
 
@@ -313,16 +397,16 @@ This output represents a first modernization layer over an OpenAPI/Swagger speci
   - Client generated from OpenAPI using Kiota
 
 - `src/{{projectName}}.Core`
-  - Contracts and shared models for API consumption
+  - Contracts and shared models for API consumo
   - Includes:
     - `Interfaces/IApiFacade.cs`
-    - `Interfaces/IGeneratedApiService.cs`
+{{IndentLines(interfaceFilesSection, 4)}}
     - `Models/ApiOptions.cs`
 
 - `src/{{projectName}}.Infrastructure`
-  - Concrete implementation layer for services and facades
+  - Concrete implementation layer for generated services and facades
   - Includes:
-    - `Services/GeneratedApiService.cs`
+{{IndentLines(serviceFilesSection, 4)}}
     - `Facades/ApiFacade.cs`
     - `DependencyInjection/ServiceCollectionExtensions.cs`
 
@@ -332,15 +416,35 @@ This output represents a first modernization layer over an OpenAPI/Swagger speci
 
 ## Notes
 
-This generated structure is designed as a modernization starting point and can be evolved into a fully compilable multi-project solution with:
+This generated structure is intended as a modernization starting point. It can evolve to include:
 
 - real `.csproj` files
 - real `.sln` project entries
-- domain-oriented service generation by endpoint groups or tags
-- API-specific facades and services
-- authentication pipeline integration
+- method generation by endpoint
+- integration with the exact Kiota client root type
+- authentication pipeline support
+- strongly typed domain-oriented service operations
 """;
 
         File.WriteAllText(filePath, content);
+    }
+
+    private static string ToCamelCase(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return value;
+
+        if (value.Length == 1)
+            return value.ToLowerInvariant();
+
+        return char.ToLowerInvariant(value[0]) + value[1..];
+    }
+
+    private static string IndentLines(string value, int spaces)
+    {
+        var indent = new string(' ', spaces);
+
+        var lines = value.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+        return string.Join(Environment.NewLine, lines.Select(line => $"{indent}{line}"));
     }
 }

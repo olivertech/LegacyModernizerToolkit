@@ -7,6 +7,7 @@ public static class DependencyInjectionExtensions
         services.AddScoped<ISpecificationValidationService, SpecificationValidationService>();
         services.AddScoped<IClientGenerationService, ClientGenerationService>();
         services.AddScoped<ISolutionCompositionService, SolutionCompositionService>();
+        services.AddScoped<IApiGroupingService, ApiGroupingService>();
 
         return services;
     }

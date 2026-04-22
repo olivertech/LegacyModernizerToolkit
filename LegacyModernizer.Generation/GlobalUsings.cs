@@ -7,6 +7,7 @@ global using LegacyModernizer.Domain.ValueObjects;
 global using LegacyModernizer.Generation.Composition;
 global using LegacyModernizer.Generation.Kiota;
 global using LegacyModernizer.Application.Contracts.Generations.Models;
+global using LegacyModernizer.Application.DTOs.Commons;
 // System namespaces
 global using System.Text.Json;
 global using Microsoft.Extensions.DependencyInjection;

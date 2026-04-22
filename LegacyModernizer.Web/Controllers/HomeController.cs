@@ -1,7 +1,3 @@
-using LegacyModernizer.Application.Contracts.Services;
-using LegacyModernizer.Application.DTOs.Requests;
-using LegacyModernizer.Web.ViewModels;
-
 namespace LegacyModernizer.Web.Controllers;
 
 public sealed class HomeController : Controller

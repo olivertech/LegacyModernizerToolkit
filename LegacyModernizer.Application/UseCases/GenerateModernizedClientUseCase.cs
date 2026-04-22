@@ -11,13 +11,15 @@ public sealed class GenerateModernizedClientUseCase : IGenerateModernizedClientU
     private readonly IClientGenerationService _clientGenerationService;
     private readonly ISolutionCompositionService _solutionCompositionService;
     private readonly IPackageGenerationService _packageGenerationService;
+    private readonly IApiGroupingService _apiGroupingService;
 
     public GenerateModernizedClientUseCase(IWorkspacePreparationService workspacePreparationService,
                                            ISpecificationAcquisitionService specificationAcquisitionService,
                                            ISpecificationValidationService specificationValidationService,
                                            IClientGenerationService clientGenerationService,
                                            ISolutionCompositionService solutionCompositionService,
-                                           IPackageGenerationService packageGenerationService)
+                                           IPackageGenerationService packageGenerationService,
+                                           IApiGroupingService apiGroupingService)
     {
         _workspacePreparationService = workspacePreparationService ?? throw new ArgumentNullException(nameof(workspacePreparationService));
         _specificationAcquisitionService = specificationAcquisitionService ?? throw new ArgumentNullException(nameof(specificationAcquisitionService));
@@ -25,6 +27,7 @@ public sealed class GenerateModernizedClientUseCase : IGenerateModernizedClientU
         _clientGenerationService = clientGenerationService ?? throw new ArgumentNullException(nameof(clientGenerationService));
         _solutionCompositionService = solutionCompositionService ?? throw new ArgumentNullException(nameof(solutionCompositionService));
         _packageGenerationService = packageGenerationService ?? throw new ArgumentNullException(nameof(packageGenerationService));
+        _apiGroupingService = apiGroupingService;
     }
 
     public async Task<GenerateModernizedClientResponse> ExecuteAsync(GenerateModernizedClientRequest request,
@@ -121,7 +124,8 @@ public sealed class GenerateModernizedClientUseCase : IGenerateModernizedClientU
             // rastreabilidade e auditoria, permitindo acompanhar a evolução da solução ao longo do processo de modernização.
             // ===========================================================================================================================
             execution.AdvanceToStep(ExecutionStep.SolutionComposition);
-            var solution = await _solutionCompositionService.ComposeAsync(modernizationRequest, workspace, generatedClientArtifact, cancellationToken);
+            var groups = await _apiGroupingService.GetGroupsAsync(specification, cancellationToken);
+            var solution = await _solutionCompositionService.ComposeAsync(modernizationRequest, workspace, generatedClientArtifact, groups, cancellationToken);
             execution.SetSolution(solution);
 
             // ===========================================================================================================================
