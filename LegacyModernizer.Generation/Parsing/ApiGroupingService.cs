@@ -74,25 +74,16 @@ public sealed class ApiGroupingService : IApiGroupingService
                     OperationId = ExtractOperationId(operation)
                 };
 
-                group.Endpoints.Add(endpoint);
+                if (!ContainsEndpoint(group, endpoint))
+                {
+                    group.Endpoints.Add(endpoint);
+                }
             }
         }
 
         return groups.Values
             .OrderBy(g => g.Name)
             .ToArray();
-    }
-
-    private static string ExtractOperationId(JsonElement operation)
-    {
-        if (operation.ValueKind == JsonValueKind.Object &&
-            operation.TryGetProperty("operationId", out var operationIdElement) &&
-            operationIdElement.ValueKind == JsonValueKind.String)
-        {
-            return operationIdElement.GetString() ?? string.Empty;
-        }
-
-        return string.Empty;
     }
 
     private static string ExtractGroupName(JsonElement operation, string path)
@@ -131,6 +122,26 @@ public sealed class ApiGroupingService : IApiGroupingService
         var firstSegment = segments.FirstOrDefault();
 
         return NormalizeGroupName(firstSegment);
+    }
+
+    private static string ExtractOperationId(JsonElement operation)
+    {
+        if (operation.ValueKind == JsonValueKind.Object &&
+            operation.TryGetProperty("operationId", out var operationIdElement) &&
+            operationIdElement.ValueKind == JsonValueKind.String)
+        {
+            return operationIdElement.GetString() ?? string.Empty;
+        }
+
+        return string.Empty;
+    }
+
+    private static bool ContainsEndpoint(ApiGroupDefinition group, ApiEndpointDefinition endpoint)
+    {
+        return group.Endpoints.Any(existing =>
+            existing.Path.Equals(endpoint.Path, StringComparison.OrdinalIgnoreCase) &&
+            existing.Method.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase) &&
+            existing.OperationId.Equals(endpoint.OperationId, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsVersionSegment(string segment)

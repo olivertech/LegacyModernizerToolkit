@@ -8,6 +8,7 @@ public static class DependencyInjectionExtensions
         services.AddScoped<IClientGenerationService, ClientGenerationService>();
         services.AddScoped<ISolutionCompositionService, SolutionCompositionService>();
         services.AddScoped<IApiGroupingService, ApiGroupingService>();
+        services.AddScoped<IKiotaOutputInspectionService, KiotaOutputInspectionService>();
 
         return services;
     }

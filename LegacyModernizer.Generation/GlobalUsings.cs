@@ -8,7 +8,9 @@ global using LegacyModernizer.Generation.Composition;
 global using LegacyModernizer.Generation.Kiota;
 global using LegacyModernizer.Application.Contracts.Generations.Models;
 global using LegacyModernizer.Application.DTOs.Commons;
+global using LegacyModernizer.Application.Contracts.Generation;
+global using LegacyModernizer.Application.DTOs.Common;
 // System namespaces
 global using System.Text.Json;
 global using Microsoft.Extensions.DependencyInjection;
-global using System.Diagnostics;
+global using System.Text.RegularExpressions;

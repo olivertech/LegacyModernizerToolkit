@@ -35,11 +35,12 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
      * Ele deve validar os inputs, garantir que o workspace esteja preparado, e organizar os artefatos gerados de forma coerente.
      * A solução resultante deve ser fácil de entender e navegar, mesmo para desenvolvedores que não estão familiarizados com o processo de modernização.
      */
-    public Task<ModernizedSolution> ComposeAsync(ModernizationRequest request,
-                                                 Workspace workspace,
-                                                 GeneratedArtifact generatedClientArtifact,
-                                                 IReadOnlyCollection<ApiGroupDefinition> groups,
-                                                 CancellationToken cancellationToken = default)
+    public Task<ModernizedSolution> ComposeAsync(
+        ModernizationRequest request,
+        Workspace workspace,
+        GeneratedArtifact generatedClientArtifact,
+        IReadOnlyCollection<ApiGroupDefinition> groups,
+        CancellationToken cancellationToken = default)
     {
         if (request is null)
             throw new ArgumentNullException(nameof(request));
@@ -69,9 +70,9 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
         var normalizedGroups = groups
             .Where(x => !string.IsNullOrWhiteSpace(x.Name))
-            .Select(x => x.Name.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(x => x)
+            .GroupBy(x => x.Name.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .OrderBy(x => x.Name)
             .ToArray();
 
         var solutionRootPath = Path.Combine(workspace.Paths.ComposedPath, projectName);
@@ -107,10 +108,10 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
         CreateApiOptionsFile(coreModelsPath, baseNamespace);
 
-        foreach (var groupName in normalizedGroups)
+        foreach (var group in normalizedGroups)
         {
-            CreateGroupInterfaceFile(coreInterfacesPath, baseNamespace, groupName);
-            CreateGroupServiceFile(infrastructureServicesPath, baseNamespace, groupName);
+            CreateGroupInterfaceFile(coreInterfacesPath, baseNamespace, group);
+            CreateGroupServiceFile(infrastructureServicesPath, baseNamespace, group);
         }
 
         CreateApiFacadeInterfaceFile(coreInterfacesPath, baseNamespace, normalizedGroups);
@@ -182,36 +183,62 @@ public sealed class ApiOptions
         File.WriteAllText(filePath, content);
     }
 
-    private static void CreateGroupInterfaceFile(string coreInterfacesPath, string baseNamespace, string groupName)
+    private static void CreateGroupInterfaceFile(
+        string coreInterfacesPath,
+        string baseNamespace,
+        ApiGroupDefinition group)
     {
+        var groupName = group.Name.Trim();
         var filePath = Path.Combine(coreInterfacesPath, $"I{groupName}Service.cs");
+
+        var methodDefinitions = BuildInterfaceMethodDefinitions(group);
+
+        var methodsBlock = string.IsNullOrWhiteSpace(methodDefinitions)
+            ? string.Empty
+            : Environment.NewLine + Environment.NewLine + methodDefinitions;
 
         var content =
 $$"""
+using System.Threading;
+using System.Threading.Tasks;
+
 namespace {{baseNamespace}}.Core.Interfaces;
 
 public interface I{{groupName}}Service
 {
-    string GroupName { get; }
+    string GroupName { get; }{{methodsBlock}}
 }
 """;
 
         File.WriteAllText(filePath, content);
     }
 
-    private static void CreateGroupServiceFile(string infrastructureServicesPath, string baseNamespace, string groupName)
+    private static void CreateGroupServiceFile(
+        string infrastructureServicesPath,
+        string baseNamespace,
+        ApiGroupDefinition group)
     {
+        var groupName = group.Name.Trim();
         var filePath = Path.Combine(infrastructureServicesPath, $"{groupName}Service.cs");
+
+        var methodImplementations = BuildServiceMethodImplementations(group);
+
+        var methodsBlock = string.IsNullOrWhiteSpace(methodImplementations)
+            ? string.Empty
+            : Environment.NewLine + Environment.NewLine + methodImplementations;
 
         var content =
 $$"""
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 using {{baseNamespace}}.Core.Interfaces;
 
 namespace {{baseNamespace}}.Infrastructure.Services;
 
 public sealed class {{groupName}}Service : I{{groupName}}Service
 {
-    public string GroupName => "{{groupName}}";
+    public string GroupName => "{{groupName}}";{{methodsBlock}}
 }
 """;
 
@@ -221,13 +248,13 @@ public sealed class {{groupName}}Service : I{{groupName}}Service
     private static void CreateApiFacadeInterfaceFile(
         string coreInterfacesPath,
         string baseNamespace,
-        IReadOnlyCollection<string> groups)
+        IReadOnlyCollection<ApiGroupDefinition> groups)
     {
         var filePath = Path.Combine(coreInterfacesPath, "IApiFacade.cs");
 
         var properties = groups.Count == 0
             ? "    // No API groups were detected."
-            : string.Join(Environment.NewLine, groups.Select(g => $"    I{g}Service {g} {{ get; }}"));
+            : string.Join(Environment.NewLine, groups.Select(g => $"    I{g.Name}Service {g.Name} {{ get; }}"));
 
         var content =
 $$"""
@@ -245,23 +272,21 @@ public interface IApiFacade
     private static void CreateApiFacadeFile(
         string infrastructureFacadesPath,
         string baseNamespace,
-        IReadOnlyCollection<string> groups)
+        IReadOnlyCollection<ApiGroupDefinition> groups)
     {
         var filePath = Path.Combine(infrastructureFacadesPath, "ApiFacade.cs");
 
-        var usingBlock = $"{baseNamespace}.Core.Interfaces";
-
         var constructorParameters = groups.Count == 0
             ? string.Empty
-            : string.Join("," + Environment.NewLine, groups.Select(g => $"        I{g}Service {ToCamelCase(g)}"));
+            : string.Join("," + Environment.NewLine, groups.Select(g => $"        I{g.Name}Service {ToCamelCase(g.Name)}"));
 
         var assignments = groups.Count == 0
             ? "        // No API groups were detected."
-            : string.Join(Environment.NewLine, groups.Select(g => $"        {g} = {ToCamelCase(g)} ?? throw new ArgumentNullException(nameof({ToCamelCase(g)}));"));
+            : string.Join(Environment.NewLine, groups.Select(g => $"        {g.Name} = {ToCamelCase(g.Name)} ?? throw new ArgumentNullException(nameof({ToCamelCase(g.Name)}));"));
 
         var properties = groups.Count == 0
             ? "    // No API groups were detected."
-            : string.Join(Environment.NewLine + Environment.NewLine, groups.Select(g => $"    public I{g}Service {g} {{ get; }}"));
+            : string.Join(Environment.NewLine + Environment.NewLine, groups.Select(g => $"    public I{g.Name}Service {g.Name} {{ get; }}"));
 
         var constructorBlock = groups.Count == 0
             ? """
@@ -281,7 +306,8 @@ $$"""
 
         var content =
 $$"""
-using {{usingBlock}};
+using System;
+using {{baseNamespace}}.Core.Interfaces;
 
 namespace {{baseNamespace}}.Infrastructure.Facades;
 
@@ -299,25 +325,21 @@ public sealed class ApiFacade : IApiFacade
     private static void CreateServiceCollectionExtensionsFile(
         string infrastructureDependencyInjectionPath,
         string baseNamespace,
-        IReadOnlyCollection<string> groups)
+        IReadOnlyCollection<ApiGroupDefinition> groups)
     {
         var filePath = Path.Combine(infrastructureDependencyInjectionPath, "ServiceCollectionExtensions.cs");
 
-        var interfaceUsings = $"{baseNamespace}.Core.Interfaces";
-        var modelUsings = $"{baseNamespace}.Core.Models";
-        var facadeUsings = $"{baseNamespace}.Infrastructure.Facades";
-        var serviceUsings = $"{baseNamespace}.Infrastructure.Services";
-
         var registrations = groups.Count == 0
             ? "        // No API groups were detected."
-            : string.Join(Environment.NewLine, groups.Select(g => $"        services.AddScoped<I{g}Service, {g}Service>();"));
+            : string.Join(Environment.NewLine, groups.Select(g => $"        services.AddScoped<I{g.Name}Service, {g.Name}Service>();"));
 
         var content =
 $$"""
-using {{interfaceUsings}};
-using {{modelUsings}};
-using {{facadeUsings}};
-using {{serviceUsings}};
+using System;
+using {{baseNamespace}}.Core.Interfaces;
+using {{baseNamespace}}.Core.Models;
+using {{baseNamespace}}.Infrastructure.Facades;
+using {{baseNamespace}}.Infrastructure.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace {{baseNamespace}}.Infrastructure.DependencyInjection;
@@ -351,22 +373,22 @@ public static class ServiceCollectionExtensions
     private static void CreateReadmeFile(
         string solutionRootPath,
         ModernizationRequest request,
-        IReadOnlyCollection<string> groups)
+        IReadOnlyCollection<ApiGroupDefinition> groups)
     {
         var projectName = request.ProjectName.ToString();
         var baseNamespace = request.BaseNamespace.ToString();
 
         var groupsSection = groups.Count == 0
             ? "- No API groups were detected during composition."
-            : string.Join(Environment.NewLine, groups.Select(g => $"- `{g}`"));
+            : string.Join(Environment.NewLine, groups.Select(g => $"- `{g.Name}` ({g.Endpoints.Count} endpoints)"));
 
         var serviceFilesSection = groups.Count == 0
             ? "- No service files were generated."
-            : string.Join(Environment.NewLine, groups.Select(g => $"- `Services/{g}Service.cs`"));
+            : string.Join(Environment.NewLine, groups.Select(g => $"- `Services/{g.Name}Service.cs`"));
 
         var interfaceFilesSection = groups.Count == 0
             ? "- No interface files were generated."
-            : string.Join(Environment.NewLine, groups.Select(g => $"- `Interfaces/I{g}Service.cs`"));
+            : string.Join(Environment.NewLine, groups.Select(g => $"- `Interfaces/I{g.Name}Service.cs`"));
 
         var filePath = Path.Combine(solutionRootPath, "README.md");
 
@@ -397,7 +419,7 @@ This output represents a first modernization layer over an OpenAPI/Swagger speci
   - Client generated from OpenAPI using Kiota
 
 - `src/{{projectName}}.Core`
-  - Contracts and shared models for API consumo
+  - Contracts and shared models for API consumption
   - Includes:
     - `Interfaces/IApiFacade.cs`
 {{IndentLines(interfaceFilesSection, 4)}}
@@ -420,13 +442,118 @@ This generated structure is intended as a modernization starting point. It can e
 
 - real `.csproj` files
 - real `.sln` project entries
-- method generation by endpoint
 - integration with the exact Kiota client root type
 - authentication pipeline support
 - strongly typed domain-oriented service operations
 """;
 
         File.WriteAllText(filePath, content);
+    }
+
+    private static string BuildInterfaceMethodDefinitions(ApiGroupDefinition group)
+    {
+        var operations = group.Endpoints
+            .Select(e => NormalizeMethodName(e.OperationId, e.Path, e.Method))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name)
+            .ToArray();
+
+        if (operations.Length == 0)
+            return string.Empty;
+
+        return string.Join(
+            Environment.NewLine + Environment.NewLine,
+            operations.Select(op => $"    Task<object?> {op}Async(CancellationToken cancellationToken = default);"));
+    }
+
+    private static string BuildServiceMethodImplementations(ApiGroupDefinition group)
+    {
+        var operations = group.Endpoints
+            .Select(e => new
+            {
+                MethodName = NormalizeMethodName(e.OperationId, e.Path, e.Method),
+                e.OperationId,
+                e.Path,
+                e.Method
+            })
+            .Where(x => !string.IsNullOrWhiteSpace(x.MethodName))
+            .GroupBy(x => x.MethodName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .OrderBy(x => x.MethodName)
+            .ToArray();
+
+        if (operations.Length == 0)
+            return string.Empty;
+
+        return string.Join(
+            Environment.NewLine + Environment.NewLine,
+            operations.Select(op =>
+                $$"""
+    public Task<object?> {{op.MethodName}}Async(CancellationToken cancellationToken = default)
+    {
+        throw new NotImplementedException("Operation '{{op.OperationId}}' [{{op.Method}} {{op.Path}}] was generated from OpenAPI metadata.");
+    }
+"""));
+    }
+
+    private static string NormalizeMethodName(string? operationId, string path, string method)
+    {
+        if (!string.IsNullOrWhiteSpace(operationId))
+        {
+            return NormalizeIdentifier(operationId);
+        }
+
+        var pathSegments = path
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(segment => !segment.StartsWith("{") && !segment.EndsWith("}"))
+            .Where(segment => !IsVersionSegment(segment))
+            .Select(NormalizeIdentifier)
+            .Where(segment => !string.IsNullOrWhiteSpace(segment));
+
+        var composedName = string.Concat(pathSegments);
+
+        if (string.IsNullOrWhiteSpace(composedName))
+        {
+            composedName = "Operation";
+        }
+
+        return NormalizeIdentifier(method) + composedName;
+    }
+
+    private static string NormalizeIdentifier(string? rawValue)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+            return string.Empty;
+
+        var parts = rawValue
+            .Split(new[] { '-', '_', '.', '/', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => new string(part.Where(char.IsLetterOrDigit).ToArray()))
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToArray();
+
+        if (parts.Length == 0)
+            return string.Empty;
+
+        return string.Concat(parts.Select(p => p.Length == 1
+            ? p.ToUpperInvariant()
+            : char.ToUpperInvariant(p[0]) + p[1..]));
+    }
+
+    private static bool IsVersionSegment(string segment)
+    {
+        if (string.IsNullOrWhiteSpace(segment))
+            return false;
+
+        segment = segment.Trim();
+
+        if (segment.Length < 2)
+            return false;
+
+        if (segment[0] != 'v' && segment[0] != 'V')
+            return false;
+
+        return char.IsDigit(segment[1]);
     }
 
     private static string ToCamelCase(string value)
