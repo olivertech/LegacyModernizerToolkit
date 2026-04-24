@@ -12,4 +12,6 @@ public sealed class KiotaOperationMetadata
     public string AccessExpression { get; init; } = string.Empty;
 
     public List<KiotaRequestBodyPropertyMetadata> RequestBodyProperties { get; init; } = new();
+
+    public List<KiotaPathParameterMetadata> PathParameters { get; init; } = new();
 }

@@ -10,6 +10,10 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             @"public\s+(?<type>(?:global::)?[A-Za-z0-9_.<>,\s\?\[\]]+)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*\{\s*get;\s*set;\s*\}",
             RegexOptions.Compiled | RegexOptions.Singleline);
 
+    private sealed record KiotaMethodSignature(
+        string ReturnType,
+        string ParametersText);
+
     public Task<KiotaClientMetadata> InspectAsync(
         GeneratedArtifact generatedClientArtifact,
         IReadOnlyCollection<ApiGroupDefinition> apiGroups,
@@ -48,14 +52,12 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             detectedGroups,
             apiGroups);
 
-        var metadata = new KiotaClientMetadata
+        return Task.FromResult(new KiotaClientMetadata
         {
             RootNamespace = rootNamespace,
             ClientClassName = clientClassName,
             Groups = detectedGroups
-        };
-
-        return Task.FromResult(metadata);
+        });
     }
 
     private static void EnrichGroupsWithEndpointOperations(
@@ -269,18 +271,13 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         var content = File.ReadAllText(builderFile);
         var asyncMethodName = GetKiotaAsyncMethodName(endpoint.Method);
 
-        var methodRegex = new Regex(
-            $@"public\s+(?:async\s+)?Task<(?<returnType>[\s\S]+?)>\s+{asyncMethodName}\s*\((?<parameters>[\s\S]*?)\)",
-            RegexOptions.Compiled | RegexOptions.Singleline);
+        var signature = ExtractKiotaMethodSignature(content, asyncMethodName);
 
-        var match = methodRegex.Match(content);
-
-        if (!match.Success)
+        if (signature is null)
             return null;
 
-        var returnType = CleanTypeName(match.Groups["returnType"].Value);
-        var parametersText = match.Groups["parameters"].Value;
-        var requestBodyType = DetectRequestBodyTypeName(asyncMethodName, parametersText);
+        var returnType = CleanTypeName(signature.ReturnType);
+        var requestBodyType = DetectRequestBodyTypeName(asyncMethodName, signature.ParametersText);
 
         var accessExpression = BuildAccessExpressionFromBuilderFile(
             clientRootPath,
@@ -291,6 +288,12 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             ? new List<KiotaRequestBodyPropertyMetadata>()
             : ExtractRequestBodyProperties(clientRootPath, requestBodyType);
 
+        var pathParameters = ExtractPathParameters(
+            clientRootPath,
+            builderFile,
+            endpoint,
+            kiotaGroup);
+
         return new KiotaOperationMetadata
         {
             OperationId = endpoint.OperationId,
@@ -299,8 +302,104 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             ReturnTypeName = returnType,
             RequestBodyTypeName = requestBodyType,
             AccessExpression = accessExpression,
-            RequestBodyProperties = bodyProperties
+            RequestBodyProperties = bodyProperties,
+            PathParameters = pathParameters
         };
+    }
+
+    private static KiotaMethodSignature? ExtractKiotaMethodSignature(
+        string content,
+        string asyncMethodName)
+    {
+        var lines = content
+            .Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)
+            .Select(x => x.Trim())
+            .ToArray();
+
+        foreach (var line in lines)
+        {
+            if (!line.Contains("public async Task<", StringComparison.Ordinal))
+                continue;
+
+            if (!line.Contains($"{asyncMethodName}(", StringComparison.Ordinal))
+                continue;
+
+            var returnType = ExtractTaskReturnType(line);
+
+            if (string.IsNullOrWhiteSpace(returnType))
+                continue;
+
+            var parameters = ExtractMethodParameters(line, asyncMethodName);
+
+            if (parameters is null)
+                continue;
+
+            return new KiotaMethodSignature(returnType, parameters);
+        }
+
+        return null;
+    }
+
+    private static string ExtractTaskReturnType(string methodSignatureLine)
+    {
+        var taskStart = methodSignatureLine.IndexOf("Task<", StringComparison.Ordinal);
+
+        if (taskStart < 0)
+            return string.Empty;
+
+        var typeStart = taskStart + "Task<".Length;
+        var depth = 1;
+
+        for (var i = typeStart; i < methodSignatureLine.Length; i++)
+        {
+            var current = methodSignatureLine[i];
+
+            if (current == '<')
+                depth++;
+
+            if (current == '>')
+                depth--;
+
+            if (depth == 0)
+                return methodSignatureLine[typeStart..i].Trim();
+        }
+
+        return string.Empty;
+    }
+
+    private static string? ExtractMethodParameters(
+        string methodSignatureLine,
+        string asyncMethodName)
+    {
+        var methodIndex = methodSignatureLine.IndexOf(
+            asyncMethodName,
+            StringComparison.Ordinal);
+
+        if (methodIndex < 0)
+            return null;
+
+        var openParenthesisIndex = methodSignatureLine.IndexOf('(', methodIndex);
+
+        if (openParenthesisIndex < 0)
+            return null;
+
+        var depth = 0;
+
+        for (var i = openParenthesisIndex; i < methodSignatureLine.Length; i++)
+        {
+            var current = methodSignatureLine[i];
+
+            if (current == '(')
+                depth++;
+
+            if (current == ')')
+                depth--;
+
+            if (depth == 0)
+                return methodSignatureLine[(openParenthesisIndex + 1)..i].Trim();
+        }
+
+        return null;
     }
 
     private static string BuildAccessExpressionFromBuilderFile(
@@ -330,6 +429,139 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             return fullAccessExpression[(groupPrefix.Length + 1)..];
 
         return fullAccessExpression;
+    }
+
+    private static List<KiotaPathParameterMetadata> ExtractPathParameters(
+        string clientRootPath,
+        string builderFile,
+        ApiEndpointDefinition endpoint,
+        KiotaGroupMetadata kiotaGroup)
+    {
+        var pathParameters = endpoint.Parameters
+            .Where(x => x.Location.Equals("path", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (pathParameters.Length == 0)
+            return new List<KiotaPathParameterMetadata>();
+
+        var result = new List<KiotaPathParameterMetadata>();
+
+        foreach (var pathParameter in pathParameters)
+        {
+            var parameterName = ToCamelCase(NormalizeIdentifier(pathParameter.Name));
+            var accessExpression = DetectPathParameterAccessExpression(
+                clientRootPath,
+                builderFile,
+                pathParameter.Name,
+                parameterName,
+                kiotaGroup);
+
+            result.Add(new KiotaPathParameterMetadata
+            {
+                Name = pathParameter.Name,
+                AccessExpression = accessExpression
+            });
+        }
+
+        return result;
+    }
+
+    private static string DetectPathParameterAccessExpression(
+        string clientRootPath,
+        string builderFile,
+        string originalParameterName,
+        string parameterName,
+        KiotaGroupMetadata kiotaGroup)
+    {
+        var parentBuilderFile = FindParentRequestBuilderFile(
+            clientRootPath,
+            builderFile,
+            kiotaGroup);
+
+        if (string.IsNullOrWhiteSpace(parentBuilderFile) || !File.Exists(parentBuilderFile))
+            return $"[{parameterName}]";
+
+        var content = File.ReadAllText(parentBuilderFile);
+
+        if (HasIndexerForParameter(content, parameterName))
+            return $"[{parameterName}]";
+
+        var byMethod = FindByMethodForParameter(content, originalParameterName, parameterName);
+
+        if (!string.IsNullOrWhiteSpace(byMethod))
+            return $".{byMethod}({parameterName})";
+
+        return $"[{parameterName}]";
+    }
+
+    private static string? FindParentRequestBuilderFile(
+        string clientRootPath,
+        string builderFile,
+        KiotaGroupMetadata kiotaGroup)
+    {
+        var builderDirectory = Path.GetDirectoryName(builderFile);
+
+        if (string.IsNullOrWhiteSpace(builderDirectory))
+            return null;
+
+        var parentDirectory = Directory.GetParent(builderDirectory)?.FullName;
+
+        if (string.IsNullOrWhiteSpace(parentDirectory))
+            return null;
+
+        var relativeParentDirectory = Path.GetRelativePath(clientRootPath, parentDirectory);
+
+        var parentSegments = SplitRelativePath(relativeParentDirectory);
+
+        if (parentSegments.Length == 0)
+            return null;
+
+        var parentBuilderStem = parentSegments[^1];
+
+        var parentBuilderFile = Path.Combine(
+            parentDirectory,
+            $"{NormalizeIdentifier(parentBuilderStem)}RequestBuilder.cs");
+
+        if (File.Exists(parentBuilderFile))
+            return parentBuilderFile;
+
+        var alternative = Directory
+            .GetFiles(parentDirectory, "*RequestBuilder.cs", SearchOption.TopDirectoryOnly)
+            .FirstOrDefault();
+
+        return alternative;
+    }
+
+    private static bool HasIndexerForParameter(string content, string parameterName)
+    {
+        return content.Contains("this[", StringComparison.OrdinalIgnoreCase)
+            && content.Contains(parameterName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? FindByMethodForParameter(
+        string content,
+        string originalParameterName,
+        string parameterName)
+    {
+        var normalizedOriginal = NormalizeIdentifier(originalParameterName);
+        var normalizedParameter = NormalizeIdentifier(parameterName);
+
+        var candidates = new[]
+        {
+            $"By{normalizedOriginal}",
+            $"By{normalizedParameter}",
+            "ById",
+            "ByUserId",
+            "ByKey"
+        };
+
+        foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (content.Contains($"{candidate}(", StringComparison.OrdinalIgnoreCase))
+                return candidate;
+        }
+
+        return null;
     }
 
     private static List<KiotaRequestBodyPropertyMetadata> ExtractRequestBodyProperties(
@@ -362,6 +594,9 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             if (string.IsNullOrWhiteSpace(propertyName))
                 continue;
 
+            if (IsIgnoredRequestBodyProperty(propertyName))
+                continue;
+
             properties.Add(new KiotaRequestBodyPropertyMetadata
             {
                 Name = propertyName,
@@ -375,6 +610,13 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             .Select(g => g.First())
             .OrderBy(x => x.Name)
             .ToList();
+    }
+
+    private static bool IsIgnoredRequestBodyProperty(string propertyName)
+    {
+        return propertyName.Equals("AdditionalData", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Equals("BackingStore", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Equals("OdataType", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? FindClassFile(
@@ -436,6 +678,9 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
 
             if (cleaned.Contains("RequestConfiguration", StringComparison.OrdinalIgnoreCase))
                 continue;
+
+            if (cleaned.Contains("= default", StringComparison.OrdinalIgnoreCase))
+                cleaned = cleaned[..cleaned.IndexOf("= default", StringComparison.OrdinalIgnoreCase)].Trim();
 
             var tokens = cleaned
                 .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -586,5 +831,16 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             part.Length == 1
                 ? part.ToUpperInvariant()
                 : char.ToUpperInvariant(part[0]) + part[1..]));
+    }
+
+    private static string ToCamelCase(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return value;
+
+        if (value.Length == 1)
+            return value.ToLowerInvariant();
+
+        return char.ToLowerInvariant(value[0]) + value[1..];
     }
 }

@@ -14,8 +14,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Extensions\" />
-    <Folder Include="Configurations\" />
     <Folder Include="Models\ViewModels\" />
     <Folder Include="Models\Responses\" />
     <Folder Include="Models\Requests\" />

@@ -12,9 +12,4 @@
     <ProjectReference Include="..\LegacyModernizer.Shared\LegacyModernizer.Shared.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Scaffolding\" />
-    <Folder Include="Templates\" />
-  </ItemGroup>
-
 </Project>
