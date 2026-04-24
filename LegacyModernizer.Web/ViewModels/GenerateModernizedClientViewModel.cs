@@ -14,4 +14,8 @@ public sealed class GenerateModernizedClientViewModel
     [Required(ErrorMessage = "The base namespace is required.")]
     [Display(Name = "Base Namespace")]
     public string BaseNamespace { get; set; } = string.Empty;
+
+    [Required]
+    [Display(Name = "Target Framework")]
+    public string TargetFramework { get; set; } = "net8.0";
 }

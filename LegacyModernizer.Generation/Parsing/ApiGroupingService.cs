@@ -25,16 +25,20 @@ public sealed class ApiGroupingService : IApiGroupingService
         };
     }
 
-    private static async Task<IReadOnlyCollection<ApiGroupDefinition>> ExtractFromJsonAsync(string specificationPath,
-                                                                                            CancellationToken cancellationToken)
+    private static async Task<IReadOnlyCollection<ApiGroupDefinition>> ExtractFromJsonAsync(string specificationPath, CancellationToken cancellationToken)
     {
         var content = await File.ReadAllTextAsync(specificationPath, cancellationToken);
 
         using var document = JsonDocument.Parse(content);
         var root = document.RootElement;
 
-        if (!root.TryGetProperty("paths", out var pathsElement) || pathsElement.ValueKind != JsonValueKind.Object)
+        var globalSecurityRequired = HasGlobalSecurity(root);
+
+        if (!root.TryGetProperty("paths", out var pathsElement) ||
+            pathsElement.ValueKind != JsonValueKind.Object)
+        {
             return Array.Empty<ApiGroupDefinition>();
+        }
 
         var groups = new Dictionary<string, ApiGroupDefinition>(StringComparer.OrdinalIgnoreCase);
 
@@ -71,13 +75,14 @@ public sealed class ApiGroupingService : IApiGroupingService
                 {
                     Path = path,
                     Method = operationProperty.Name.ToUpperInvariant(),
-                    OperationId = ExtractOperationId(operation)
+                    OperationId = ExtractOperationId(operation),
+                    Parameters = ExtractParameters(pathItem, operation),
+                    HasRequestBody = HasRequestBody(operation),
+                    RequiresAuthorization = RequiresAuthorization(operation, globalSecurityRequired)
                 };
 
                 if (!ContainsEndpoint(group, endpoint))
-                {
                     group.Endpoints.Add(endpoint);
-                }
             }
         }
 
@@ -97,8 +102,7 @@ public sealed class ApiGroupingService : IApiGroupingService
                 if (tag.ValueKind != JsonValueKind.String)
                     continue;
 
-                var tagValue = tag.GetString();
-                var normalizedTag = NormalizeGroupName(tagValue);
+                var normalizedTag = NormalizeGroupName(tag.GetString());
 
                 if (!string.IsNullOrWhiteSpace(normalizedTag))
                     return normalizedTag;
@@ -119,9 +123,7 @@ public sealed class ApiGroupingService : IApiGroupingService
             .Where(segment => !segment.StartsWith("{") && !segment.EndsWith("}"))
             .ToArray();
 
-        var firstSegment = segments.FirstOrDefault();
-
-        return NormalizeGroupName(firstSegment);
+        return NormalizeGroupName(segments.FirstOrDefault());
     }
 
     private static string ExtractOperationId(JsonElement operation)
@@ -136,12 +138,113 @@ public sealed class ApiGroupingService : IApiGroupingService
         return string.Empty;
     }
 
+    private static List<ApiParameterDefinition> ExtractParameters(JsonElement pathItem, JsonElement operation)
+    {
+        var parameters = new List<ApiParameterDefinition>();
+
+        AddParametersFromElement(pathItem, parameters);
+        AddParametersFromElement(operation, parameters);
+
+        return parameters
+            .GroupBy(x => $"{x.Location}:{x.Name}", StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.Last())
+            .OrderBy(x => x.Location)
+            .ThenBy(x => x.Name)
+            .ToList();
+    }
+
+    private static void AddParametersFromElement(JsonElement element, List<ApiParameterDefinition> parameters)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+            return;
+
+        if (!element.TryGetProperty("parameters", out var parametersElement) ||
+            parametersElement.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var parameter in parametersElement.EnumerateArray())
+        {
+            if (parameter.ValueKind != JsonValueKind.Object)
+                continue;
+
+            if (parameter.TryGetProperty("$ref", out _))
+                continue;
+
+            var name = parameter.TryGetProperty("name", out var nameElement)
+                ? nameElement.GetString() ?? string.Empty
+                : string.Empty;
+
+            var location = parameter.TryGetProperty("in", out var inElement)
+                ? inElement.GetString() ?? string.Empty
+                : string.Empty;
+
+            var required = parameter.TryGetProperty("required", out var requiredElement) &&
+                           requiredElement.ValueKind == JsonValueKind.True;
+
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(location))
+                continue;
+
+            parameters.Add(new ApiParameterDefinition
+            {
+                Name = name,
+                Location = location,
+                Required = required
+            });
+        }
+    }
+
+    private static bool HasRequestBody(JsonElement operation)
+    {
+        return operation.ValueKind == JsonValueKind.Object &&
+               operation.TryGetProperty("requestBody", out _);
+    }
+
+    private static bool HasGlobalSecurity(JsonElement root)
+    {
+        return root.ValueKind == JsonValueKind.Object &&
+               root.TryGetProperty("security", out var securityElement) &&
+               securityElement.ValueKind == JsonValueKind.Array &&
+               securityElement.GetArrayLength() > 0;
+    }
+
+    private static bool RequiresAuthorization(JsonElement operation, bool globalSecurityRequired)
+    {
+        if (operation.ValueKind != JsonValueKind.Object)
+            return globalSecurityRequired;
+
+        if (!operation.TryGetProperty("security", out var securityElement))
+            return globalSecurityRequired;
+
+        if (securityElement.ValueKind == JsonValueKind.Array &&
+            securityElement.GetArrayLength() == 0)
+        {
+            return false;
+        }
+
+        return securityElement.ValueKind == JsonValueKind.Array &&
+               securityElement.GetArrayLength() > 0;
+    }
+
     private static bool ContainsEndpoint(ApiGroupDefinition group, ApiEndpointDefinition endpoint)
     {
         return group.Endpoints.Any(existing =>
             existing.Path.Equals(endpoint.Path, StringComparison.OrdinalIgnoreCase) &&
             existing.Method.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase) &&
             existing.OperationId.Equals(endpoint.OperationId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsHttpVerb(string value)
+    {
+        return value.Equals("get", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("post", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("put", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("patch", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("delete", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("head", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("options", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("trace", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsVersionSegment(string segment)
@@ -160,31 +263,23 @@ public sealed class ApiGroupingService : IApiGroupingService
         return char.IsDigit(segment[1]);
     }
 
-    private static bool IsHttpVerb(string value)
-    {
-        return value.Equals("get", StringComparison.OrdinalIgnoreCase)
-            || value.Equals("post", StringComparison.OrdinalIgnoreCase)
-            || value.Equals("put", StringComparison.OrdinalIgnoreCase)
-            || value.Equals("patch", StringComparison.OrdinalIgnoreCase)
-            || value.Equals("delete", StringComparison.OrdinalIgnoreCase)
-            || value.Equals("head", StringComparison.OrdinalIgnoreCase)
-            || value.Equals("options", StringComparison.OrdinalIgnoreCase)
-            || value.Equals("trace", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static string NormalizeGroupName(string? rawValue)
     {
         if (string.IsNullOrWhiteSpace(rawValue))
             return string.Empty;
 
-        var cleaned = new string(rawValue
-            .Trim()
-            .Where(char.IsLetterOrDigit)
-            .ToArray());
+        var parts = rawValue
+            .Split(new[] { '-', '_', '.', '/', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => new string(part.Where(char.IsLetterOrDigit).ToArray()))
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToArray();
 
-        if (string.IsNullOrWhiteSpace(cleaned))
+        if (parts.Length == 0)
             return string.Empty;
 
-        return char.ToUpperInvariant(cleaned[0]) + cleaned[1..];
+        return string.Concat(parts.Select(part =>
+            part.Length == 1
+                ? part.ToUpperInvariant()
+                : char.ToUpperInvariant(part[0]) + part[1..]));
     }
 }

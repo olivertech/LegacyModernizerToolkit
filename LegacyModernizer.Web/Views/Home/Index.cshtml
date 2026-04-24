@@ -11,6 +11,16 @@
     @Html.AntiForgeryToken()
 
     <div class="mb-3">
+        <label asp-for="TargetFramework" class="form-label"></label>
+        <select asp-for="TargetFramework" class="form-select">
+            <option value="net8.0">.NET 8</option>
+            <option value="net9.0">.NET 9</option>
+            <option value="net10.0">.NET 10</option>
+        </select>
+        <span asp-validation-for="TargetFramework" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3">
         <label asp-for="SpecificationUrl" class="form-label"></label>
         <input asp-for="SpecificationUrl" class="form-control" />
         <span asp-validation-for="SpecificationUrl" class="text-danger"></span>
@@ -28,9 +38,32 @@
         <span asp-validation-for="BaseNamespace" class="text-danger"></span>
     </div>
 
-    <button type="submit" class="btn btn-primary">Generate Solution</button>
+    <button id="generateButton" type="submit" class="btn btn-primary">
+        <span id="generateButtonText">Generate Solution</span>
+        <span id="generateButtonSpinner"
+              class="spinner-border spinner-border-sm ms-2 d-none"
+              role="status"
+              aria-hidden="true"></span>
+    </button>
 </form>
 
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
+
+    <script>
+        const form = document.querySelector('form');
+        const button = document.getElementById('generateButton');
+        const buttonText = document.getElementById('generateButtonText');
+        const spinner = document.getElementById('generateButtonSpinner');
+
+        form.addEventListener('submit', function () {
+            if (!form.checkValidity()) {
+                return;
+            }
+
+            button.disabled = true;
+            buttonText.textContent = 'Generating...';
+            spinner.classList.remove('d-none');
+        });
+    </script>
 }

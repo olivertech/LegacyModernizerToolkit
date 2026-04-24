@@ -26,7 +26,8 @@ public sealed class HomeController : Controller
         {
             SpecificationUrl = model.SpecificationUrl,
             ProjectName = model.ProjectName,
-            BaseNamespace = model.BaseNamespace
+            BaseNamespace = model.BaseNamespace,
+            TargetFramework = model.TargetFramework
         };
 
         // Chama o caso de uso para gerar o cliente modernizado

@@ -6,5 +6,6 @@ public interface ISolutionCompositionService
                                           Workspace workspace,
                                           GeneratedArtifact generatedClientArtifact,
                                           IReadOnlyCollection<ApiGroupDefinition> groups,
+                                          KiotaClientMetadata kiotaMetadata,
                                           CancellationToken cancellationToken = default);
 }

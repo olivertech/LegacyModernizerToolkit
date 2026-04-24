@@ -1,4 +1,6 @@
-﻿namespace LegacyModernizer.Application.UseCases;
+﻿using LegacyModernizer.Application.Contracts.Generation;
+
+namespace LegacyModernizer.Application.UseCases;
 
 /// <summary>
 /// Classe responsável por orquestrar o processo de geração de um cliente modernizado a partir de uma especificação de API.
@@ -12,6 +14,7 @@ public sealed class GenerateModernizedClientUseCase : IGenerateModernizedClientU
     private readonly ISolutionCompositionService _solutionCompositionService;
     private readonly IPackageGenerationService _packageGenerationService;
     private readonly IApiGroupingService _apiGroupingService;
+    private readonly IKiotaOutputInspectionService _kiotaOutputInspectionService;
 
     public GenerateModernizedClientUseCase(IWorkspacePreparationService workspacePreparationService,
                                            ISpecificationAcquisitionService specificationAcquisitionService,
@@ -19,7 +22,8 @@ public sealed class GenerateModernizedClientUseCase : IGenerateModernizedClientU
                                            IClientGenerationService clientGenerationService,
                                            ISolutionCompositionService solutionCompositionService,
                                            IPackageGenerationService packageGenerationService,
-                                           IApiGroupingService apiGroupingService)
+                                           IApiGroupingService apiGroupingService, 
+                                           IKiotaOutputInspectionService kiotaOutputInspectionService)
     {
         _workspacePreparationService = workspacePreparationService ?? throw new ArgumentNullException(nameof(workspacePreparationService));
         _specificationAcquisitionService = specificationAcquisitionService ?? throw new ArgumentNullException(nameof(specificationAcquisitionService));
@@ -27,7 +31,8 @@ public sealed class GenerateModernizedClientUseCase : IGenerateModernizedClientU
         _clientGenerationService = clientGenerationService ?? throw new ArgumentNullException(nameof(clientGenerationService));
         _solutionCompositionService = solutionCompositionService ?? throw new ArgumentNullException(nameof(solutionCompositionService));
         _packageGenerationService = packageGenerationService ?? throw new ArgumentNullException(nameof(packageGenerationService));
-        _apiGroupingService = apiGroupingService;
+        _apiGroupingService = apiGroupingService ?? throw new ArgumentNullException(nameof(apiGroupingService));
+        _kiotaOutputInspectionService = kiotaOutputInspectionService ?? throw new ArgumentNullException(nameof(kiotaOutputInspectionService));
     }
 
     public async Task<GenerateModernizedClientResponse> ExecuteAsync(GenerateModernizedClientRequest request,
@@ -49,7 +54,8 @@ public sealed class GenerateModernizedClientUseCase : IGenerateModernizedClientU
             // Cria o request de modernização agregando as informações necessárias para o processo
             var modernizationRequest = new ModernizationRequest(specificationSource,
                                                                 projectName,
-                                                                baseNamespace);
+                                                                baseNamespace,
+                                                                request.TargetFramework);
 
             // ===========================================================================================================================
             // 1 - Inicia a execução do processo de modernização, registrando o request e o estado inicial
@@ -125,7 +131,8 @@ public sealed class GenerateModernizedClientUseCase : IGenerateModernizedClientU
             // ===========================================================================================================================
             execution.AdvanceToStep(ExecutionStep.SolutionComposition);
             var groups = await _apiGroupingService.GetGroupsAsync(specification, cancellationToken);
-            var solution = await _solutionCompositionService.ComposeAsync(modernizationRequest, workspace, generatedClientArtifact, groups, cancellationToken);
+            var kiotaMetadata = await _kiotaOutputInspectionService.InspectAsync(generatedClientArtifact, cancellationToken);
+            var solution = await _solutionCompositionService.ComposeAsync(modernizationRequest, workspace, generatedClientArtifact, groups, kiotaMetadata, cancellationToken);
             execution.SetSolution(solution);
 
             // ===========================================================================================================================
