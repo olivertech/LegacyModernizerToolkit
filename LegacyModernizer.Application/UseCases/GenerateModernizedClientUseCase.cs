@@ -131,7 +131,7 @@ public sealed class GenerateModernizedClientUseCase : IGenerateModernizedClientU
             // ===========================================================================================================================
             execution.AdvanceToStep(ExecutionStep.SolutionComposition);
             var groups = await _apiGroupingService.GetGroupsAsync(specification, cancellationToken);
-            var kiotaMetadata = await _kiotaOutputInspectionService.InspectAsync(generatedClientArtifact, cancellationToken);
+            var kiotaMetadata = await _kiotaOutputInspectionService.InspectAsync(generatedClientArtifact, groups, cancellationToken);
             var solution = await _solutionCompositionService.ComposeAsync(modernizationRequest, workspace, generatedClientArtifact, groups, kiotaMetadata, cancellationToken);
             execution.SetSolution(solution);
 
