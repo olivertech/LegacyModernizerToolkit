@@ -1,0 +1,109 @@
+# Kiota Output Fix Plan (LegacyModernizerToolkit)
+
+## Table of Contents
+- [Executive Summary](#executive-summary)
+- [Migration Strategy](#migration-strategy)
+- [Detailed Dependency Analysis](#detailed-dependency-analysis)
+- [Project-by-Project Plans](#project-by-project-plans)
+- [Error & Warning Mapping](#error--warning-mapping)
+- [Breaking Changes Catalog](#breaking-changes-catalog)
+- [Testing & Validation Strategy](#testing--validation-strategy)
+- [Risk Management](#risk-management)
+- [Complexity & Effort Assessment](#complexity--effort-assessment)
+- [Source Control Strategy](#source-control-strategy)
+- [Success Criteria](#success-criteria)
+
+## Executive Summary
+### Scenario
+Corrigir o gerador de solution modernizada (Kiota) para eliminar erros e warnings reportados no `dotnet build` da solution gerada (ex.: `Ark.Infrastructure`), sem alterar o projeto base do cliente.
+
+### Scope
+- Ajustes no **gerador** do `LegacyModernizerToolkit` que produz:
+  - `ApiFacade.*.cs`
+  - Service interfaces/implementations
+  - Cadeias de request builder e retorno de modelos
+
+### Target Outcomes
+- Gerar código sem `CS0029`, `CS1977` e reduzir `CS0618` e `CS8603` na solution modernizada.
+
+## Migration Strategy
+### Approach
+Correções **apenas no gerador** (`LegacyModernizer.Generation`) e re-geração da solution modernizada. Nenhuma alteração direta no projeto gerado.
+
+### Sequência
+1. Corrigir resolução de operação/retorno e mapeamento de coleções.
+2. Corrigir geração da cadeia de request builder e configuração (lambda) sem `dynamic`.
+3. Corrigir uso de indexer obsoleto em request builders.
+4. Ajustar nullability de retornos (`CS8603`).
+
+## Detailed Dependency Analysis
+### Origem dos erros
+- Os erros acontecem no **output** (ex.: `Ark.Infrastructure.Facades.ApiFacade.*.cs`).
+- O source desses arquivos é o `LegacyModernizer.Generation` (classe `SolutionCompositionService`) e o inspector `KiotaOutputInspectionService`.
+
+### Arquivos do gerador envolvidos
+- `LegacyModernizer.Generation/Composition/SolutionCompositionService.cs`
+- `LegacyModernizer.Generation/Kiota/KiotaOutputInspectionService.cs`
+
+## Project-by-Project Plans
+
+### Project: LegacyModernizer.Generation
+**Current State**: gera chamadas Kiota e signatures a partir de metadata da inspeção
+
+**Target State**: gera chamadas compatíveis com API Kiota atual, evitando `dynamic`, retornos incompatíveis e indexers obsoletos.
+
+**Migration Steps**:
+1. Ajustar `ResolveKiotaOperation` para mapear corretamente a operação por path + access expression.
+2. Revisar `ResolveReturnType` para identificar coleções em tipos `*Response` (ex.: `Value`/`Items`).
+3. Atualizar `BuildKiotaCallExpression` para evitar chamadas dinâmicas em lambda (gerar chamadas tipadas).
+4. Atualizar `BuildKiotaBuilderChain` para preferir métodos `ByXxx`/indexer tipado quando disponível.
+5. Ajustar retornos para nullable (`T?`) ou coalescer para listas vazias quando aplicável.
+
+### Project: LegacyModernizer.Generation (Kiota inspector)
+**Current State**: identifica coleção apenas por `List/IList/ICollection/IEnumerable`.
+
+**Target State**: identifica coleção quando o retorno é wrapper de resposta com propriedade `Value`.
+
+**Migration Steps**:
+1. Ao inspecionar retorno, detectar `*Response` que contém `public List<T> Value` ou `ICollection<T> Value`.
+2. Propagar `IsCollection` e `ReturnTypeName` com o tipo real dos itens.
+
+## Error & Warning Mapping
+| Log | Causa provável | Correção no gerador |
+| --- | --- | --- |
+| `CS0029` (Response ? List<Response>) | `ResolveReturnType` assume coleção, mas Kiota retorna wrapper | Mapear `Value` e retornar `result?.Value` no facade |
+| `CS1977` (lambda em operação dinâmica) | Cadeia de request builder resolve para `dynamic`/`object` | Gerar chamadas tipadas e evitar `object` intermediário |
+| `CS0618` (indexer obsoleto) | Uso de `this[string]` em request builder | Preferir `ByXxx(...)` ou indexer tipado conforme metadados |
+| `CS8603` (possível null) | Métodos retornam `T` porém result é `T?` | Tornar retorno `T?` ou coalescer (ex.: `result ?? new()` / `result?.Value ?? []`) |
+
+## Breaking Changes Catalog
+- Nenhuma mudança de API pública no toolkit, apenas geração de código de saída.
+- Mudanças de assinatura de retorno no output (ex.: `List<T>` ? `List<T>` via `.Value`).
+
+## Testing & Validation Strategy
+1. Gerar uma solution modernizada de referência (ex.: `Ark`).
+2. Executar `dotnet build` e comparar com logs atuais.
+3. Validar ausência de `CS0029` e `CS1977`.
+4. Revisar warnings `CS0618/CS8603` e confirmar redução.
+
+## Risk Management
+| Risk | Level | Mitigation |
+| --- | --- | --- |
+| Mudança incorreta no mapeamento de retorno | Medium | Validar tipo retornado no código Kiota gerado e ajustar mapeamento |
+| Operações com path parameters complexos | Medium | Validar `ResolveKiotaOperation` com casos reais |
+
+## Complexity & Effort Assessment
+| Area | Complexity | Notes |
+| --- | --- | --- |
+| Kiota metadata inspection | Medium | Necessário identificar wrappers de coleção |
+| Gerador de chamadas | Medium | Evitar `dynamic` e indexer obsoleto |
+
+## Source Control Strategy
+- Branch dedicada para correções do gerador.
+- Commits agrupados por: (1) resolução de operação/retorno, (2) builder chain/config.
+
+## Success Criteria
+- Solution modernizada compila com 0 erros.
+- `CS0029` e `CS1977` eliminados.
+- `CS0618` e `CS8603` reduzidos ao mínimo justificável.
+- Nenhuma alteração manual no output gerado.

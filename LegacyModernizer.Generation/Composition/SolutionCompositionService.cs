@@ -38,7 +38,8 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
         var projectName = request.ProjectName.ToString();
         var baseNamespace = request.BaseNamespace.ToString();
-        var targetFramework = request.TargetFramework;
+        var targetFramework = request.TargetFramework ?? "net8.0";
+        var clientClassName = $"{projectName}ApiClient";
 
         var normalizedGroups = groups
             .Where(x => !string.IsNullOrWhiteSpace(x.Name))
@@ -74,6 +75,8 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
         CopyDirectory(generatedClientPath, apiClientProjectPath);
 
+        RenameKiotaClientClass(apiClientProjectPath, projectName);
+
         CreateProjectFiles(
             projectName,
             targetFramework,
@@ -97,6 +100,7 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         CreateApiFacadeBaseFile(
             infrastructureFacadesPath,
             baseNamespace,
+            clientClassName,
             kiotaMetadata);
 
         foreach (var group in normalizedGroups)
@@ -123,7 +127,9 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         CreateServiceCollectionExtensionsFile(
             infrastructureDependencyInjectionPath,
             baseNamespace,
-            normalizedGroups);
+            projectName,
+            normalizedGroups,
+            kiotaMetadata);
 
         CreateReadmeFile(
             solutionRootPath,
@@ -215,7 +221,7 @@ $$"""
         var filePath = Path.Combine(coreProjectPath, $"{projectName}.Core.csproj");
 
         var content =
-$$"""
+    $$"""
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
@@ -225,6 +231,10 @@ $$"""
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\{{projectName}}.ApiClient\{{projectName}}.ApiClient.csproj" />
+  </ItemGroup>
+
 </Project>
 """;
 
@@ -232,9 +242,9 @@ $$"""
     }
 
     private static void CreateInfrastructureProjectFile(
-        string projectName,
-        string targetFramework,
-        string infrastructureProjectPath)
+            string projectName,
+            string targetFramework,
+            string infrastructureProjectPath)
     {
         var filePath = Path.Combine(infrastructureProjectPath, $"{projectName}.Infrastructure.csproj");
 
@@ -371,28 +381,25 @@ public interface IApiFacade
     private static void CreateApiFacadeBaseFile(
         string infrastructureFacadesPath,
         string baseNamespace,
+        string clientClassName,
         KiotaClientMetadata kiotaMetadata)
     {
         var filePath = Path.Combine(infrastructureFacadesPath, "ApiFacade.cs");
 
-        var clientClassName = string.IsNullOrWhiteSpace(kiotaMetadata.ClientClassName)
-            ? "GeneratedApiClient"
-            : kiotaMetadata.ClientClassName;
+        var clientNamespace = $"{baseNamespace}.ApiClient";
 
-        var rootNamespace = string.IsNullOrWhiteSpace(kiotaMetadata.RootNamespace)
-            ? baseNamespace
-            : kiotaMetadata.RootNamespace;
+        var fullyQualifiedClientClassName = BuildFullyQualifiedTypeName(
+            clientNamespace,
+            clientClassName);
 
-        var rootUsing = string.IsNullOrWhiteSpace(rootNamespace)
-            ? string.Empty
-            : $"using {rootNamespace};";
+        var rootUsing = $"using {clientNamespace};";
 
         var builderProperties = kiotaMetadata.Groups.Count == 0
             ? "    // No Kiota request builders were detected."
             : string.Join(
                 Environment.NewLine,
                 kiotaMetadata.Groups.Select(group =>
-                    $"    private dynamic {group.GroupName}Api => _apiClient.{group.BuilderAccessExpression};"));
+                    $"    private object {group.GroupName}Api => _apiClient.{group.BuilderAccessExpression};"));
 
         var content =
 $$"""
@@ -405,13 +412,13 @@ namespace {{baseNamespace}}.Infrastructure.Facades;
 
 public sealed partial class ApiFacade : IApiFacade
 {
-    private readonly {{clientClassName}} _apiClient;
+    private readonly {{fullyQualifiedClientClassName}} _apiClient;
     private readonly IHttpClientFactory _httpClientFactory;
 
 {{builderProperties}}
 
     public ApiFacade(
-        {{clientClassName}} apiClient,
+        {{fullyQualifiedClientClassName}} apiClient,
         IHttpClientFactory httpClientFactory)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
@@ -437,6 +444,7 @@ public sealed partial class ApiFacade : IApiFacade
 $$"""
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Kiota.Abstractions;
 
 namespace {{baseNamespace}}.Infrastructure.Facades;
 
@@ -490,6 +498,7 @@ $$"""
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Kiota.Abstractions;
 using {{baseNamespace}}.Core.Interfaces;
 
 namespace {{baseNamespace}}.Infrastructure.Services;
@@ -511,32 +520,71 @@ public sealed class {{groupName}}Service : I{{groupName}}Service
     }
 
     private static void CreateServiceCollectionExtensionsFile(
-        string infrastructureDependencyInjectionPath,
-        string baseNamespace,
-        IReadOnlyCollection<ApiGroupDefinition> groups)
+    string infrastructureDependencyInjectionPath,
+    string baseNamespace,
+    string projectName,
+    IReadOnlyCollection<ApiGroupDefinition> groups,
+    KiotaClientMetadata kiotaMetadata)
     {
         var filePath = Path.Combine(infrastructureDependencyInjectionPath, "ServiceCollectionExtensions.cs");
+
+        var clientClassName = $"{projectName}ApiClient";
+        var clientNamespace = $"{baseNamespace}.ApiClient";
 
         var serviceRegistrations = groups.Count == 0
             ? "        // No API groups were detected."
             : string.Join(Environment.NewLine, groups.Select(g => $"        services.AddScoped<I{g.Name}Service, {g.Name}Service>();"));
 
         var content =
-$$"""
+    $$"""
 using System;
+using {{clientNamespace}};
 using {{baseNamespace}}.Core.Interfaces;
 using {{baseNamespace}}.Infrastructure.Facades;
 using {{baseNamespace}}.Infrastructure.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Kiota.Abstractions;
+using Microsoft.Kiota.Abstractions.Authentication;
+using Microsoft.Kiota.Http.HttpClientLibrary;
 
 namespace {{baseNamespace}}.Infrastructure.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddGeneratedApi(this IServiceCollection services)
+    public static IServiceCollection AddGeneratedApi(
+        this IServiceCollection services,
+        string baseUrl)
     {
         if (services is null)
             throw new ArgumentNullException(nameof(services));
+
+        if (string.IsNullOrWhiteSpace(baseUrl))
+            throw new ArgumentException("Base URL cannot be empty.", nameof(baseUrl));
+
+        services.AddHttpClient("GeneratedApi", client =>
+        {
+            client.BaseAddress = new Uri(baseUrl);
+        });
+
+        services.AddScoped<IAuthenticationProvider, AnonymousAuthenticationProvider>();
+
+        services.AddScoped<IRequestAdapter>(serviceProvider =>
+        {
+            var httpClientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
+            var httpClient = httpClientFactory.CreateClient("GeneratedApi");
+            var authenticationProvider = serviceProvider.GetRequiredService<IAuthenticationProvider>();
+
+            return new HttpClientRequestAdapter(authenticationProvider, httpClient: httpClient)
+            {
+                BaseUrl = baseUrl
+            };
+        });
+
+        services.AddScoped<{{clientClassName}}>(serviceProvider =>
+        {
+            var requestAdapter = serviceProvider.GetRequiredService<IRequestAdapter>();
+            return new {{clientClassName}}(requestAdapter);
+        });
 
         services.AddScoped<IApiFacade, ApiFacade>();
 
@@ -640,6 +688,11 @@ The generated facade follows the partial class pattern, allowing each API area t
                 var parameters = BuildFacadeMethodParameters(group.Name, x.Endpoint, kiotaMetadata);
                 var returnType = ResolveReturnType(group.Name, x.Endpoint, kiotaMetadata);
                 var kiotaCallExpression = BuildKiotaCallExpression(group.Name, x.Endpoint, kiotaMetadata);
+                var operation = ResolveKiotaOperation(group.Name, x.Endpoint, kiotaMetadata);
+
+                var returnStatement = operation?.IsCollection == true
+                    ? "return result?.Value ?? [];"
+                    : "return result;";
 
                 return
 $$"""
@@ -647,7 +700,7 @@ $$"""
     {
         var result = await {{kiotaCallExpression}}.ConfigureAwait(false);
 
-        return result;
+        {{returnStatement}}
     }
 """;
             });
@@ -746,26 +799,13 @@ $$"""
         KiotaClientMetadata kiotaMetadata)
     {
         var parameters = new List<string>();
-        var operation = ResolveKiotaOperation(groupName, endpoint, kiotaMetadata);
 
         AddPathParameters(parameters, endpoint);
 
         if (endpoint.HasRequestBody)
         {
-            if (operation is not null && operation.RequestBodyProperties.Count > 0)
-            {
-                foreach (var property in operation.RequestBodyProperties
-                            .Where(p => !p.Name.Equals("AdditionalData", StringComparison.OrdinalIgnoreCase)))
-                {
-                    var parameterName = ToCamelCase(property.Name);
-                    parameters.Add($"{property.TypeName} {parameterName}");
-                }
-            }
-            else
-            {
-                var bodyType = ResolveRequestBodyType(groupName, endpoint, kiotaMetadata);
-                parameters.Add($"{bodyType} request");
-            }
+            var bodyType = ResolveRequestBodyType(groupName, endpoint, kiotaMetadata);
+            parameters.Add($"{bodyType} request");
         }
 
         AddQueryParameters(parameters, endpoint);
@@ -779,6 +819,56 @@ $$"""
         return string.Join(", ", parameters);
     }
 
+    private static bool IsOperationSafeForExplodedRequest(
+    ApiEndpointDefinition endpoint,
+    KiotaOperationMetadata operation)
+    {
+        if (operation is null)
+            return false;
+
+        if (string.IsNullOrWhiteSpace(operation.RequestBodyTypeName))
+            return false;
+
+        if (operation.RequestBodyTypeName.Equals("object?", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (operation.RequestBodyProperties.Count == 0)
+            return false;
+
+        var requestBodyClassName = ExtractClassName(operation.RequestBodyTypeName);
+
+        if (requestBodyClassName.EndsWith("PostRequestBody", StringComparison.OrdinalIgnoreCase) ||
+            requestBodyClassName.EndsWith("PutRequestBody", StringComparison.OrdinalIgnoreCase) ||
+            requestBodyClassName.EndsWith("PatchRequestBody", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string ExtractClassName(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+            return string.Empty;
+
+        var cleaned = typeName
+            .Replace("global::", string.Empty)
+            .Replace("?", string.Empty)
+            .Trim();
+
+        var genericStart = cleaned.IndexOf('<');
+
+        if (genericStart >= 0)
+            cleaned = cleaned[..genericStart];
+
+        var lastDot = cleaned.LastIndexOf('.');
+
+        return lastDot >= 0
+            ? cleaned[(lastDot + 1)..]
+            : cleaned;
+    }
+
     private static void AddPathParameters(
         List<string> parameters,
         ApiEndpointDefinition endpoint)
@@ -786,7 +876,7 @@ $$"""
         foreach (var parameter in endpoint.Parameters
             .Where(x => x.Location.Equals("path", StringComparison.OrdinalIgnoreCase)))
         {
-            parameters.Add($"string {ToCamelCase(NormalizeIdentifier(parameter.Name))}");
+            parameters.Add($"{ResolveParameterType(parameter, isQueryParameter: false)} {ToCamelCase(NormalizeIdentifier(parameter.Name))}");
         }
     }
 
@@ -797,7 +887,7 @@ $$"""
         foreach (var parameter in endpoint.Parameters
             .Where(x => x.Location.Equals("query", StringComparison.OrdinalIgnoreCase)))
         {
-            parameters.Add($"string? {ToCamelCase(NormalizeIdentifier(parameter.Name))} = null");
+            parameters.Add($"{ResolveParameterType(parameter, isQueryParameter: true)} {ToCamelCase(NormalizeIdentifier(parameter.Name))}");
         }
     }
 
@@ -812,39 +902,38 @@ $$"""
         }
     }
 
+    private static string ResolveParameterType(ApiParameterDefinition parameter, bool isQueryParameter)
+    {
+        var name = parameter.Name?.Trim().ToLowerInvariant() ?? string.Empty;
+
+        if (name is "page" or "pageindex" or "pagenumber" or "pagesize" or "limit" or "offset" or "take" or "skip" or "size" or "count" or "year" or "month" or "day" ||
+            name.EndsWith("year", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith("month", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith("day", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith("count", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith("size", StringComparison.OrdinalIgnoreCase))
+            return "int?";
+
+        if (name.EndsWith("id", StringComparison.OrdinalIgnoreCase))
+            return "string";
+
+        if (name.Contains("date", StringComparison.OrdinalIgnoreCase))
+            return "DateTime?";
+
+        return isQueryParameter ? "dynamic?" : "string?";
+    }
+
     private static string BuildRequestBodyCreationBlock(
         KiotaOperationMetadata? operation)
     {
-        if (operation is null)
-            return string.Empty;
+        return string.Empty;
+    }
 
-        if (operation.RequestBodyProperties.Count == 0)
-            return string.Empty;
-
-        if (string.IsNullOrWhiteSpace(operation.RequestBodyTypeName) ||
-            operation.RequestBodyTypeName.Equals("object?", StringComparison.OrdinalIgnoreCase))
-        {
-            return string.Empty;
-        }
-
-        var assignments = string.Join(
-            Environment.NewLine,
-            operation.RequestBodyProperties
-                .Where(p => !p.Name.Equals("AdditionalData", StringComparison.OrdinalIgnoreCase))
-                .Select(property =>
-                {
-                    var parameterName = ToCamelCase(property.Name);
-                    return $"            {property.Name} = {parameterName},";
-                }));
-
-        return
-$$"""
-        var request = new {{operation.RequestBodyTypeName}}
-        {
-{{assignments}}
-        };
-
-""";
+    private static bool IsIgnoredRequestBodyProperty(string propertyName)
+    {
+        return propertyName.Equals("AdditionalData", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Equals("BackingStore", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Equals("OdataType", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string BuildFacadeArgumentsFromService(
@@ -853,17 +942,11 @@ $$"""
         KiotaClientMetadata kiotaMetadata)
     {
         var arguments = new List<string>();
-        var operation = ResolveKiotaOperation(groupName, endpoint, kiotaMetadata);
 
         AddPathArguments(arguments, endpoint);
 
         if (endpoint.HasRequestBody)
-        {
-            if (operation is not null && operation.RequestBodyProperties.Count > 0)
-                arguments.Add("request");
-            else
-                arguments.Add("request");
-        }
+            arguments.Add("request");
 
         AddQueryArguments(arguments, endpoint);
         AddHeaderArguments(arguments, endpoint);
@@ -919,20 +1002,21 @@ $$"""
             endpoint,
             kiotaMetadata);
 
+        var operation = ResolveKiotaOperation(
+            apiGroupName,
+            endpoint,
+            kiotaMetadata);
+
         var groupApiProperty = groupMetadata is null
-            ? $"{NormalizeIdentifier(apiGroupName)}Api"
-            : $"{groupMetadata.GroupName}Api";
+            ? $"_apiClient.{NormalizeIdentifier(apiGroupName)}"
+            : $"_apiClient.{groupMetadata.BuilderAccessExpression}";
 
-        var groupNameForPath = groupMetadata?.GroupName ?? apiGroupName;
-
-        var remainingSegments = ExtractSegmentsAfterGroup(endpoint.Path, groupNameForPath)
-            .Select(NormalizeIdentifier)
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .ToArray();
-
-        var builderChain = remainingSegments.Length == 0
-            ? groupApiProperty
-            : $"{groupApiProperty}!.{string.Join(".", remainingSegments)}";
+        var builderChain = BuildKiotaBuilderChain(
+            groupApiProperty,
+            apiGroupName,
+            endpoint,
+            operation,
+            kiotaMetadata);
 
         var asyncMethodName = GetKiotaAsyncMethodName(endpoint.Method);
         var configBlock = BuildKiotaRequestConfiguration(endpoint);
@@ -942,6 +1026,48 @@ $$"""
             return $"{builderChain}.{asyncMethodName}({bodyArgument}cancellationToken: cancellationToken)";
 
         return $"{builderChain}.{asyncMethodName}({bodyArgument}config =>{Environment.NewLine}        {{{Environment.NewLine}{configBlock}{Environment.NewLine}        }}, cancellationToken: cancellationToken)";
+    }
+
+    private static string BuildKiotaBuilderChain(
+        string groupApiProperty,
+        string apiGroupName,
+        ApiEndpointDefinition endpoint,
+        KiotaOperationMetadata? operation,
+        KiotaClientMetadata kiotaMetadata)
+    {
+        var groupMetadata = ResolveKiotaGroupMetadata(
+            apiGroupName,
+            endpoint,
+            kiotaMetadata);
+
+        var groupNameForPath = groupMetadata?.GroupName ?? apiGroupName;
+
+        var pathSegmentsAfterGroup = ExtractSegmentsAfterGroupKeepingPathParameters(
+            endpoint.Path,
+            groupNameForPath);
+
+        if (pathSegmentsAfterGroup.Length == 0)
+            return groupApiProperty;
+
+        var chain = groupApiProperty;
+
+        foreach (var segment in pathSegmentsAfterGroup)
+        {
+            if (IsPathParameterSegment(segment))
+            {
+                var parameterName = ExtractPathParameterName(segment);
+                var parameterAccess = ResolvePathParameterAccessExpression(
+                    parameterName,
+                    operation);
+
+                chain += parameterAccess;
+                continue;
+            }
+
+            chain += $".{NormalizeIdentifier(segment)}";
+        }
+
+        return chain;
     }
 
     private static string BuildKiotaRequestConfiguration(ApiEndpointDefinition endpoint)
@@ -968,11 +1094,34 @@ $$"""
         {
             var parameterName = ToCamelCase(NormalizeIdentifier(query.Name));
             var propertyName = NormalizeIdentifier(query.Name);
+            var assignmentValue = BuildKiotaQueryParameterAssignmentValue(parameterName, query.Name);
 
-            lines.Add($"            config.QueryParameters.{propertyName} = {parameterName};");
+            lines.Add($"            config.QueryParameters.{propertyName} = {assignmentValue};");
         }
 
         return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string BuildKiotaQueryParameterAssignmentValue(
+        string parameterName,
+        string originalParameterName)
+    {
+        if (originalParameterName.Contains("date", StringComparison.OrdinalIgnoreCase))
+            return $"{parameterName} == null ? null : new Microsoft.Kiota.Abstractions.Date({parameterName}.Value)";
+
+        return parameterName;
+    }
+
+    private static string NormalizeOpenApiPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return string.Empty;
+
+        return string.Join(
+            "/",
+            path.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(x => !IsVersionSegment(x))
+                .Select(x => IsPathParameterSegment(x) ? "{param}" : x.Trim().ToLowerInvariant()));
     }
 
     private static string ResolveReturnType(
@@ -985,7 +1134,12 @@ $$"""
         if (operation is null || string.IsNullOrWhiteSpace(operation.ReturnTypeName))
             return "object?";
 
-        return operation.ReturnTypeName;
+        var normalized = NormalizeGeneratedTypeName(operation.ReturnTypeName);
+
+        if (operation.IsCollection)
+            return $"List<{normalized}>";
+
+        return normalized;
     }
 
     private static string ResolveRequestBodyType(
@@ -996,9 +1150,9 @@ $$"""
         var operation = ResolveKiotaOperation(groupName, endpoint, kiotaMetadata);
 
         if (operation is null || string.IsNullOrWhiteSpace(operation.RequestBodyTypeName))
-            return "object?";
+            return "dynamic";
 
-        return operation.RequestBodyTypeName;
+        return NormalizeGeneratedTypeName(operation.RequestBodyTypeName);
     }
 
     private static KiotaOperationMetadata? ResolveKiotaOperation(
@@ -1006,6 +1160,28 @@ $$"""
         ApiEndpointDefinition endpoint,
         KiotaClientMetadata kiotaMetadata)
     {
+        var normalizedEndpointPath = NormalizeOpenApiPath(endpoint.Path);
+        var allOperations = kiotaMetadata.Groups
+            .SelectMany(g => g.Operations)
+            .ToArray();
+
+        var exactPathMatch = allOperations.FirstOrDefault(x =>
+            x.HttpMethod.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase) &&
+            x.EndpointPath.Equals(normalizedEndpointPath, StringComparison.OrdinalIgnoreCase));
+
+        if (exactPathMatch is not null)
+            return exactPathMatch;
+
+        if (!string.IsNullOrWhiteSpace(endpoint.OperationId))
+        {
+            var operationIdMatch = allOperations.FirstOrDefault(x =>
+                x.HttpMethod.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase) &&
+                x.OperationId.Equals(endpoint.OperationId, StringComparison.OrdinalIgnoreCase));
+
+            if (operationIdMatch is not null)
+                return operationIdMatch;
+        }
+
         var groupMetadata = ResolveKiotaGroupMetadata(
             apiGroupName,
             endpoint,
@@ -1014,39 +1190,32 @@ $$"""
         if (groupMetadata is null)
             return null;
 
-        var remainingSegments = ExtractSegmentsAfterGroup(endpoint.Path, groupMetadata.GroupName)
-            .Select(NormalizeIdentifier)
+        var remainingSegments = ExtractSegmentsAfterGroupKeepingPathParameters(
+                endpoint.Path,
+                groupMetadata.GroupName)
+            .Select(segment => IsPathParameterSegment(segment) ? "Item" : NormalizeIdentifier(segment))
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .ToArray();
 
         var accessExpression = string.Join(".", remainingSegments);
-
-        var exactMatch = groupMetadata.Operations.FirstOrDefault(x =>
-            x.HttpMethod.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase) &&
-            x.AccessExpression.Equals(accessExpression, StringComparison.OrdinalIgnoreCase));
-
-        if (exactMatch is not null)
-            return exactMatch;
-
-        var operationIdMatch = groupMetadata.Operations.FirstOrDefault(x =>
-            !string.IsNullOrWhiteSpace(endpoint.OperationId) &&
-            x.OperationId.Equals(endpoint.OperationId, StringComparison.OrdinalIgnoreCase));
-
-        if (operationIdMatch is not null)
-            return operationIdMatch;
-
-        var partialMatch = groupMetadata.Operations.FirstOrDefault(x =>
-            x.HttpMethod.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase) &&
-            (
-                x.AccessExpression.EndsWith(accessExpression, StringComparison.OrdinalIgnoreCase) ||
-                accessExpression.EndsWith(x.AccessExpression, StringComparison.OrdinalIgnoreCase)
-            ));
-
-        if (partialMatch is not null)
-            return partialMatch;
+        var normalizedAccessExpression = NormalizeAccessExpression(accessExpression);
 
         return groupMetadata.Operations.FirstOrDefault(x =>
-            x.HttpMethod.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase));
+            x.HttpMethod.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase) &&
+            (x.AccessExpression.Equals(accessExpression, StringComparison.OrdinalIgnoreCase) ||
+             NormalizeAccessExpression(x.AccessExpression)
+                 .Equals(normalizedAccessExpression, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static string NormalizeAccessExpression(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        return value
+            .Replace(".Item.", ".", StringComparison.OrdinalIgnoreCase)
+            .Replace(".Item", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Trim('.');
     }
 
     private static KiotaGroupMetadata? ResolveKiotaGroupMetadata(
@@ -1100,6 +1269,72 @@ $$"""
             .ToArray();
     }
 
+    private static string[] ExtractSegmentsAfterGroupKeepingPathParameters(
+        string path,
+        string groupName)
+    {
+        var segments = path
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(x => !IsVersionSegment(x))
+            .ToArray();
+
+        var groupIndex = Array.FindIndex(
+            segments,
+            x => NormalizeIdentifier(RemoveRouteBraces(x))
+                .Equals(groupName, StringComparison.OrdinalIgnoreCase));
+
+        if (groupIndex < 0 || groupIndex + 1 >= segments.Length)
+            return Array.Empty<string>();
+
+        return segments
+            .Skip(groupIndex + 1)
+            .ToArray();
+    }
+
+    private static bool IsPathParameterSegment(string segment)
+    {
+        return !string.IsNullOrWhiteSpace(segment)
+            && segment.StartsWith("{", StringComparison.Ordinal)
+            && segment.EndsWith("}", StringComparison.Ordinal);
+    }
+
+    private static string ExtractPathParameterName(string segment)
+    {
+        return segment
+            .Trim()
+            .TrimStart('{')
+            .TrimEnd('}');
+    }
+
+    private static string RemoveRouteBraces(string segment)
+    {
+        if (string.IsNullOrWhiteSpace(segment))
+            return string.Empty;
+
+        return segment
+            .Trim()
+            .TrimStart('{')
+            .TrimEnd('}');
+    }
+
+    private static string ResolvePathParameterAccessExpression(
+        string pathParameterName,
+        KiotaOperationMetadata? operation)
+    {
+        var parameterName = ToCamelCase(NormalizeIdentifier(pathParameterName));
+
+        if (operation is null || operation.PathParameters.Count == 0)
+            return $"[{parameterName}]";
+
+        var metadata = operation.PathParameters.FirstOrDefault(x =>
+            x.Name.Equals(pathParameterName, StringComparison.OrdinalIgnoreCase));
+
+        if (metadata is null || string.IsNullOrWhiteSpace(metadata.AccessExpression))
+            return $"[{parameterName}]";
+
+        return metadata.AccessExpression;
+    }
+
     private static string GetKiotaAsyncMethodName(string httpMethod)
     {
         return httpMethod.ToUpperInvariant() switch
@@ -1115,20 +1350,17 @@ $$"""
 
     private static string NormalizeMethodName(string? operationId, string path, string method)
     {
-        if (!string.IsNullOrWhiteSpace(operationId))
-            return NormalizeIdentifier(operationId);
-
         var pathSegments = path
             .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(segment => !segment.StartsWith("{") && !segment.EndsWith("}"))
             .Where(segment => !IsVersionSegment(segment))
-            .Select(NormalizeIdentifier)
-            .Where(segment => !string.IsNullOrWhiteSpace(segment));
+            .Select(segment => IsPathParameterSegment(segment) ? "By" + NormalizeIdentifier(ExtractPathParameterName(segment)) : NormalizeIdentifier(segment))
+            .Where(segment => !string.IsNullOrWhiteSpace(segment))
+            .ToArray();
 
         var composedName = string.Concat(pathSegments);
 
         if (string.IsNullOrWhiteSpace(composedName))
-            composedName = "Operation";
+            composedName = string.IsNullOrWhiteSpace(operationId) ? "Operation" : NormalizeIdentifier(operationId);
 
         return NormalizeIdentifier(method) + composedName;
     }
@@ -1178,5 +1410,60 @@ $$"""
             return value.ToLowerInvariant();
 
         return char.ToLowerInvariant(value[0]) + value[1..];
+    }
+
+    private static string NormalizeGeneratedTypeName(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+            return "object?";
+
+        return typeName.Trim() switch
+        {
+            "Date" => "DateTime",
+            "Date?" => "DateTime?",
+            "MultipartBody" => "Microsoft.Kiota.Abstractions.MultipartBody",
+            "MultipartBody?" => "Microsoft.Kiota.Abstractions.MultipartBody?",
+            _ => typeName
+        };
+    }
+
+    private static string BuildFullyQualifiedTypeName(string rootNamespace, string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(rootNamespace))
+            return typeName;
+
+        if (string.IsNullOrWhiteSpace(typeName))
+            return rootNamespace;
+
+        return $"global::{rootNamespace}.{typeName}";
+    }
+
+    private static void RenameKiotaClientClass(
+        string apiClientProjectPath,
+        string projectName)
+    {
+        var oldFile = Directory
+            .GetFiles(apiClientProjectPath, "ApiClient.cs", SearchOption.AllDirectories)
+            .FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(oldFile))
+            return;
+
+        var oldClassName = "ApiClient";
+        var newClassName = $"{projectName}ApiClient";
+        var newFile = Path.Combine(Path.GetDirectoryName(oldFile)!, $"{newClassName}.cs");
+
+        var content = File.ReadAllText(oldFile);
+
+        content = content.Replace(
+            $"public partial class {oldClassName}",
+            $"public partial class {newClassName}");
+
+        content = content.Replace(
+            $"public {oldClassName}(",
+            $"public {newClassName}(");
+
+        File.WriteAllText(newFile, content);
+        File.Delete(oldFile);
     }
 }

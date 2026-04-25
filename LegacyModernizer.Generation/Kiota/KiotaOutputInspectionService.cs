@@ -1,4 +1,6 @@
-﻿namespace LegacyModernizer.Generation.Kiota;
+﻿using System.Text;
+
+namespace LegacyModernizer.Generation.Kiota;
 
 public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
 {
@@ -231,13 +233,13 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
     }
 
     private static string? FindRequestBuilderFileForEndpoint(
-        string clientRootPath,
-        ApiEndpointDefinition endpoint)
+    string clientRootPath,
+    ApiEndpointDefinition endpoint)
     {
         var pathSegments = endpoint.Path
             .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(x => !x.StartsWith("{") && !x.EndsWith("}"))
-            .Select(NormalizeIdentifier)
+            .Where(x => !IsVersionSegment(x))
+            .Select(x => IsPathParameterSegment(x) ? "Item" : NormalizeIdentifier(x))
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .ToArray();
 
@@ -259,7 +261,46 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         var exactMatch = matches.FirstOrDefault(file =>
             file.EndsWith(expectedTail, StringComparison.OrdinalIgnoreCase));
 
-        return exactMatch ?? matches.FirstOrDefault();
+        if (exactMatch is not null)
+            return exactMatch;
+
+        var normalizedExpectedTail = NormalizePathForComparison(expectedTail);
+
+        var bestMatch = matches
+            .OrderByDescending(file =>
+            {
+                var normalizedFile = NormalizePathForComparison(file);
+
+                if (normalizedFile.EndsWith(normalizedExpectedTail, StringComparison.OrdinalIgnoreCase))
+                    return 100;
+
+                var score = 0;
+
+                foreach (var segment in pathSegments)
+                {
+                    if (normalizedFile.Contains($"/{segment}/", StringComparison.OrdinalIgnoreCase))
+                        score++;
+                }
+
+                return score;
+            })
+            .FirstOrDefault();
+
+        return bestMatch;
+    }
+
+    private static bool IsPathParameterSegment(string segment)
+    {
+        return !string.IsNullOrWhiteSpace(segment)
+            && segment.StartsWith("{", StringComparison.Ordinal)
+            && segment.EndsWith("}", StringComparison.Ordinal);
+    }
+
+    private static string NormalizePathForComparison(string path)
+    {
+        return path
+            .Replace('\\', '/')
+            .Trim('/');
     }
 
     private static KiotaOperationMetadata? ExtractOperationFromBuilderFile(
@@ -276,7 +317,26 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         if (signature is null)
             return null;
 
-        var returnType = CleanTypeName(signature.ReturnType);
+        var rawReturnType = CleanTypeName(signature.ReturnType);
+        var isCollection = IsCollectionReturnType(rawReturnType);
+        var returnType = rawReturnType;
+
+        // Check if the return type is a wrapper response with a Value collection property
+        if (!isCollection && !rawReturnType.Equals("object?", StringComparison.OrdinalIgnoreCase))
+        {
+            var collectionItemType = ExtractCollectionItemTypeFromWrapperResponse(clientRootPath, rawReturnType);
+            if (!string.IsNullOrWhiteSpace(collectionItemType))
+            {
+                isCollection = true;
+                returnType = collectionItemType;
+            }
+        }
+
+        if (isCollection && returnType.Equals(rawReturnType, StringComparison.Ordinal))
+        {
+            returnType = ExtractInnerTypeFromCollection(rawReturnType);
+        }
+
         var requestBodyType = DetectRequestBodyTypeName(asyncMethodName, signature.ParametersText);
 
         var accessExpression = BuildAccessExpressionFromBuilderFile(
@@ -302,7 +362,9 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             ReturnTypeName = returnType,
             RequestBodyTypeName = requestBodyType,
             AccessExpression = accessExpression,
+            EndpointPath = NormalizeOpenApiPath(endpoint.Path),
             RequestBodyProperties = bodyProperties,
+            IsCollection = isCollection,
             PathParameters = pathParameters
         };
     }
@@ -316,25 +378,37 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             .Select(x => x.Trim())
             .ToArray();
 
-        foreach (var line in lines)
+        for (var i = 0; i < lines.Length; i++)
         {
+            var line = lines[i];
+
             if (!line.Contains("public async Task<", StringComparison.Ordinal))
                 continue;
 
-            if (!line.Contains($"{asyncMethodName}(", StringComparison.Ordinal))
-                continue;
+            var signatureBuilder = new StringBuilder(line);
 
-            var returnType = ExtractTaskReturnType(line);
+            for (var j = i; j < lines.Length; j++)
+            {
+                if (j > i)
+                    signatureBuilder.Append(' ').Append(lines[j]);
 
-            if (string.IsNullOrWhiteSpace(returnType))
-                continue;
+                var candidate = signatureBuilder.ToString().Trim();
 
-            var parameters = ExtractMethodParameters(line, asyncMethodName);
+                if (!candidate.Contains($"{asyncMethodName}(", StringComparison.Ordinal))
+                    continue;
 
-            if (parameters is null)
-                continue;
+                var returnType = ExtractTaskReturnType(candidate);
 
-            return new KiotaMethodSignature(returnType, parameters);
+                if (string.IsNullOrWhiteSpace(returnType))
+                    continue;
+
+                var parameters = ExtractMethodParameters(candidate, asyncMethodName);
+
+                if (parameters is null)
+                    continue;
+
+                return new KiotaMethodSignature(returnType, parameters);
+            }
         }
 
         return null;
@@ -737,6 +811,18 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             .ToArray();
     }
 
+    private static string NormalizeOpenApiPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return string.Empty;
+
+        return string.Join(
+            "/",
+            path.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(x => !IsVersionSegment(x))
+                .Select(x => IsPathParameterSegment(x) ? "{param}" : x.Trim().ToLowerInvariant()));
+    }
+
     private static string GetKiotaAsyncMethodName(string httpMethod)
     {
         return httpMethod.ToUpperInvariant() switch
@@ -842,5 +928,76 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             return value.ToLowerInvariant();
 
         return char.ToLowerInvariant(value[0]) + value[1..];
+    }
+
+    private static bool IsCollectionReturnType(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+            return false;
+
+        return typeName.Contains("List<", StringComparison.OrdinalIgnoreCase)
+            || typeName.Contains("IList<", StringComparison.OrdinalIgnoreCase)
+            || typeName.Contains("ICollection<", StringComparison.OrdinalIgnoreCase)
+            || typeName.Contains("IEnumerable<", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ExtractCollectionItemTypeFromWrapperResponse(
+        string clientRootPath,
+        string wrapperTypeName)
+    {
+        var className = ExtractClassNameFromTypeName(wrapperTypeName);
+
+        if (string.IsNullOrWhiteSpace(className))
+            return null;
+
+        var filePath = FindClassFile(clientRootPath, className);
+
+        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+            return null;
+
+        var content = File.ReadAllText(filePath);
+
+        // Look for "public List<T> Value" or "public ICollection<T> Value" property
+        var valuePropertyMatch = System.Text.RegularExpressions.Regex.Match(
+            content,
+            @"public\s+(List|IList|ICollection|IEnumerable)<(?<innerType>[^>]+)>\???\s+Value\s*\{\s*get",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        if (valuePropertyMatch.Success)
+        {
+            var innerType = valuePropertyMatch.Groups["innerType"].Value.Trim();
+            return CleanTypeName(innerType);
+        }
+
+        return null;
+    }
+
+    private static string ExtractInnerTypeFromCollection(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+            return "object?";
+
+        var start = typeName.IndexOf('<');
+
+        if (start < 0)
+            return typeName;
+
+        var depth = 0;
+
+        for (var i = start; i < typeName.Length; i++)
+        {
+            if (typeName[i] == '<')
+                depth++;
+
+            if (typeName[i] == '>')
+                depth--;
+
+            if (depth == 0)
+            {
+                return typeName[(start + 1)..i].Trim();
+            }
+        }
+
+        return typeName;
     }
 }
