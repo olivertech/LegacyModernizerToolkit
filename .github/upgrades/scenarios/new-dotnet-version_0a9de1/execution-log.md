@@ -141,3 +141,37 @@ Paused - Generator builds; waiting for regenerated Ark build output.
 ### Outcome
 Failed - Generated ApiFacade methods contain invalid syntax; need file snippet to diagnose.
 
+
+## [2026-04-25 01:47] TASK-002: Validate generator fixes by building regenerated solution
+
+### Changes Made
+- **Modified**: `LegacyModernizer.Generation/Composition/SolutionCompositionService.cs`
+  - Wrapper return block emitted only when collection wrapper is detected
+  - Defaulted collection property name to `Value` only when needed
+
+### Commits
+- `4489316`: TASK-002: Fix wrapper block generation
+
+### Outcome
+Paused - Generator builds; requires regenerated Ark build output for validation.
+
+
+## [2026-04-25 01:49] TASK-002: Validate generator fixes by building regenerated solution
+
+### Changes Made
+- **Verified**: Regenerated Ark solution and executed `dotnet build`
+- **Build Status**: Failed - 68 errors, 13 warnings
+
+### Outcome
+Failed - Collection return block and ById fallback still produce compile errors.
+
+
+## [2026-04-25 01:49] TASK-002: Validate generator fixes by building regenerated solution
+
+### Changes Made
+- **Verified**: Regenerated Ark solution and executed `dotnet build`
+- **Build Status**: Failed - 68 errors, 13 warnings
+
+### Outcome
+Failed - Collection return block and ById fallback still produce compile errors.
+

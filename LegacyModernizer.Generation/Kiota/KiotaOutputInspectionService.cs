@@ -20,6 +20,10 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         string ItemType,
         string PropertyName);
 
+    private sealed record PathParameterAccessInfo(
+        string AccessExpression,
+        string TypeName);
+
     public Task<KiotaClientMetadata> InspectAsync(
         GeneratedArtifact generatedClientArtifact,
         IReadOnlyCollection<ApiGroupDefinition> apiGroups,
@@ -332,7 +336,7 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         {
             returnType = ExtractInnerTypeFromCollection(rawReturnType);
         }
-        else if (!rawReturnType.Equals("object?", StringComparison.OrdinalIgnoreCase))
+        else if (!string.IsNullOrWhiteSpace(rawReturnType))
         {
             // Wrapper response with Value collection property
             var wrapperInfo = ExtractCollectionItemTypeFromWrapperResponse(clientRootPath, rawReturnType);
@@ -352,7 +356,7 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             builderFile,
             kiotaGroup);
 
-        var bodyProperties = requestBodyType.Equals("object?", StringComparison.OrdinalIgnoreCase)
+        var bodyProperties = string.IsNullOrWhiteSpace(requestBodyType)
             ? new List<KiotaRequestBodyPropertyMetadata>()
             : ExtractRequestBodyProperties(clientRootPath, requestBodyType);
 
@@ -533,7 +537,7 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         foreach (var pathParameter in pathParameters)
         {
             var parameterName = ToCamelCase(NormalizeIdentifier(pathParameter.Name));
-            var accessExpression = DetectPathParameterAccessExpression(
+            var accessInfo = DetectPathParameterAccessInfo(
                 clientRootPath,
                 builderFile,
                 pathParameter.Name,
@@ -543,14 +547,15 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             result.Add(new KiotaPathParameterMetadata
             {
                 Name = pathParameter.Name,
-                AccessExpression = accessExpression
+                AccessExpression = accessInfo.AccessExpression,
+                TypeName = accessInfo.TypeName
             });
         }
 
         return result;
     }
 
-    private static string DetectPathParameterAccessExpression(
+    private static PathParameterAccessInfo DetectPathParameterAccessInfo(
         string clientRootPath,
         string builderFile,
         string originalParameterName,
@@ -563,7 +568,7 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             kiotaGroup);
 
         if (string.IsNullOrWhiteSpace(parentBuilderFile) || !File.Exists(parentBuilderFile))
-            return $"[{parameterName}]";
+            return new PathParameterAccessInfo($"[{parameterName}]", "string");
 
         var parentContent = File.ReadAllText(parentBuilderFile);
         var builderContent = File.ReadAllText(builderFile);
@@ -572,15 +577,17 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         var byMethod = FindByMethodForParameter(parentContent, originalParameterName, parameterName)
             ?? FindByMethodForParameter(builderContent, originalParameterName, parameterName);
 
-        if (!string.IsNullOrWhiteSpace(byMethod))
-            return $".{byMethod}({parameterName})";
+        if (byMethod is not null)
+            return new PathParameterAccessInfo($".{byMethod.Value.MethodName}({parameterName})", byMethod.Value.ParameterTypeName);
 
         // Fall back to typed indexer only (avoid obsolete string indexer)
-        if (HasTypedIndexerForParameter(parentContent) || HasTypedIndexerForParameter(builderContent))
-            return $"[{parameterName}]";
+        var typedIndexerType = GetTypedIndexerType(parentContent) ?? GetTypedIndexerType(builderContent);
+
+        if (!string.IsNullOrWhiteSpace(typedIndexerType))
+            return new PathParameterAccessInfo($"[{parameterName}]", typedIndexerType);
 
         // Default: indexer if nothing else is available
-        return $"[{parameterName}]";
+        return new PathParameterAccessInfo($"[{parameterName}]", "string");
     }
 
     private static string? FindParentRequestBuilderFile(
@@ -621,32 +628,28 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         return alternative;
     }
 
-    private static bool HasIndexerForParameter(string content, string parameterName)
-    {
-        return content.Contains("this[", StringComparison.OrdinalIgnoreCase)
-            && content.Contains(parameterName, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool HasTypedIndexerForParameter(string content)
+    private static string? GetTypedIndexerType(string content)
     {
         if (string.IsNullOrWhiteSpace(content))
-            return false;
+            return null;
 
         var typedIndexerMatch = System.Text.RegularExpressions.Regex.Match(
             content,
-            @"this\[(?<type>[A-Za-z0-9_.]+)\s+[A-Za-z0-9_]+\]",
+            @"this\[(?<type>(?:global::)?[A-Za-z0-9_.<>\?,\s]+)\s+[A-Za-z0-9_]+\]",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         if (!typedIndexerMatch.Success)
-            return false;
+            return null;
 
-        var typeName = typedIndexerMatch.Groups["type"].Value.Trim();
+        var typeName = CleanTypeName(typedIndexerMatch.Groups["type"].Value);
 
         // Avoid obsolete string indexer
-        return !typeName.Equals("string", StringComparison.OrdinalIgnoreCase);
+        return typeName.Equals("string", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : typeName;
     }
 
-    private static string? FindByMethodForParameter(
+    private static (string MethodName, string ParameterTypeName)? FindByMethodForParameter(
         string content,
         string originalParameterName,
         string parameterName)
@@ -665,8 +668,13 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
 
         foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            if (content.Contains($"{candidate}(", StringComparison.OrdinalIgnoreCase))
-                return candidate;
+            var match = System.Text.RegularExpressions.Regex.Match(
+                content,
+                $@"\b{candidate}\s*\(\s*(?<type>(?:global::)?[A-Za-z0-9_.<>\?,\s]+)\s+[A-Za-z0-9_]+\s*\)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            if (match.Success)
+                return (candidate, CleanTypeName(match.Groups["type"].Value));
         }
 
         return null;
@@ -766,11 +774,11 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         if (methodName.Equals("GetAsync", StringComparison.OrdinalIgnoreCase) ||
             methodName.Equals("DeleteAsync", StringComparison.OrdinalIgnoreCase))
         {
-            return "object?";
+            return string.Empty;
         }
 
         if (string.IsNullOrWhiteSpace(parametersText))
-            return "object?";
+            return string.Empty;
 
         var parameters = SplitMethodParameters(parametersText);
 
@@ -799,7 +807,7 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             return CleanTypeName(string.Join(" ", tokens.Take(tokens.Length - 1)));
         }
 
-        return "object?";
+        return string.Empty;
     }
 
     private static string[] SplitMethodParameters(string parametersText)
@@ -873,7 +881,7 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
     private static string CleanTypeName(string rawType)
     {
         if (string.IsNullOrWhiteSpace(rawType))
-            return "object?";
+            return string.Empty;
 
         var cleaned = rawType
             .Replace("global::", string.Empty)
@@ -1010,7 +1018,7 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
     private static string ExtractInnerTypeFromCollection(string typeName)
     {
         if (string.IsNullOrWhiteSpace(typeName))
-            return "object?";
+            return string.Empty;
 
         var start = typeName.IndexOf('<');
 

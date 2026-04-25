@@ -5,8 +5,8 @@ public sealed class KiotaOperationMetadata
     public string OperationId { get; init; } = string.Empty;
     public string MethodName { get; init; } = string.Empty;
     public string HttpMethod { get; init; } = string.Empty;
-    public string ReturnTypeName { get; init; } = "object?";
-    public string RequestBodyTypeName { get; init; } = "object?";
+    public string ReturnTypeName { get; init; } = string.Empty;
+    public string RequestBodyTypeName { get; init; } = string.Empty;
     public string AccessExpression { get; init; } = string.Empty;
     public string EndpointPath { get; init; } = string.Empty;
     public bool IsCollection { get; init; }

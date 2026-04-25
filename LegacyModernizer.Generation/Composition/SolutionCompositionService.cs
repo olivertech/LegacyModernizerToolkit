@@ -394,13 +394,6 @@ public interface IApiFacade
 
         var rootUsing = $"using {clientNamespace};";
 
-        var builderProperties = kiotaMetadata.Groups.Count == 0
-            ? "    // No Kiota request builders were detected."
-            : string.Join(
-                Environment.NewLine,
-                kiotaMetadata.Groups.Select(group =>
-                    $"    private object {group.GroupName}Api => _apiClient.{group.BuilderAccessExpression};"));
-
         var content =
 $$"""
 using System;
@@ -414,8 +407,6 @@ public sealed partial class ApiFacade : IApiFacade
 {
     private readonly {{fullyQualifiedClientClassName}} _apiClient;
     private readonly IHttpClientFactory _httpClientFactory;
-
-{{builderProperties}}
 
     public ApiFacade(
         {{fullyQualifiedClientClassName}} apiClient,
@@ -672,8 +663,8 @@ The generated facade follows the partial class pattern, allowing each API area t
     }
 
     private static string BuildFacadePartialMethods(
-        ApiGroupDefinition group,
-        KiotaClientMetadata kiotaMetadata)
+    ApiGroupDefinition group,
+    KiotaClientMetadata kiotaMetadata)
     {
         var methods = group.Endpoints
             .Select(e => new
@@ -689,41 +680,18 @@ The generated facade follows the partial class pattern, allowing each API area t
             {
                 var parameters = BuildFacadeMethodParameters(group.Name, x.Endpoint, kiotaMetadata);
                 var returnType = ResolveReturnType(group.Name, x.Endpoint, kiotaMetadata);
-                var kiotaCallExpression = BuildKiotaCallExpression(group.Name, x.Endpoint, kiotaMetadata);
                 var operation = ResolveKiotaOperation(group.Name, x.Endpoint, kiotaMetadata);
+                var kiotaCallExpression = BuildKiotaCallExpression(group.Name, x.Endpoint, kiotaMetadata);
 
-                var collectionItemType = NormalizeGeneratedTypeName(operation?.ReturnTypeName ?? "object");
-                var collectionPropertyName = string.IsNullOrWhiteSpace(operation?.CollectionPropertyName)
-                    ? "Value"
-                    : operation!.CollectionPropertyName;
-
-                var wrapperBlock = operation?.IsCollectionWrapper == true
-                    ? $$"""
-        dynamic wrapper = result;
-        return wrapper?.{{collectionPropertyName}} ?? [];
-"""
-                    : string.Empty;
-
-                var returnStatement = operation?.IsCollection == true
-                    ? $$"""
-        if (result is null)
-            return [];
-
-        if (result is System.Collections.Generic.IEnumerable<{{collectionItemType}}> sequence)
-            return sequence.ToList();
-
-{{wrapperBlock}}
-        return new List<{{collectionItemType}}> { result };
-"""
-                    : "return result;";
+                var returnStatement = BuildFacadeReturnStatement(operation);
 
                 return
-$$"""
+    $$"""
     public async Task<{{returnType}}> {{x.MethodName}}Async({{parameters}})
     {
         var result = await {{kiotaCallExpression}}.ConfigureAwait(false);
 
-{{returnStatement}}
+        {{returnStatement}}
     }
 """;
             });
@@ -797,7 +765,7 @@ $$"""
     {
         var parameters = new List<string>();
 
-        AddPathParameters(parameters, endpoint);
+        AddPathParameters(parameters, groupName, endpoint, kiotaMetadata);
 
         if (endpoint.HasRequestBody)
         {
@@ -823,7 +791,7 @@ $$"""
     {
         var parameters = new List<string>();
 
-        AddPathParameters(parameters, endpoint);
+        AddPathParameters(parameters, groupName, endpoint, kiotaMetadata);
 
         if (endpoint.HasRequestBody)
         {
@@ -850,9 +818,6 @@ $$"""
             return false;
 
         if (string.IsNullOrWhiteSpace(operation.RequestBodyTypeName))
-            return false;
-
-        if (operation.RequestBodyTypeName.Equals("object?", StringComparison.OrdinalIgnoreCase))
             return false;
 
         if (operation.RequestBodyProperties.Count == 0)
@@ -894,12 +859,14 @@ $$"""
 
     private static void AddPathParameters(
         List<string> parameters,
-        ApiEndpointDefinition endpoint)
+        string groupName,
+        ApiEndpointDefinition endpoint,
+        KiotaClientMetadata kiotaMetadata)
     {
         foreach (var parameter in endpoint.Parameters
             .Where(x => x.Location.Equals("path", StringComparison.OrdinalIgnoreCase)))
         {
-            parameters.Add($"{ResolveParameterType(parameter, isQueryParameter: false)} {ToCamelCase(NormalizeIdentifier(parameter.Name))}");
+            parameters.Add($"{ResolvePathParameterType(groupName, endpoint, parameter, kiotaMetadata)} {ToCamelCase(NormalizeIdentifier(parameter.Name))}");
         }
     }
 
@@ -943,7 +910,7 @@ $$"""
         if (name.Contains("date", StringComparison.OrdinalIgnoreCase))
             return "DateTime?";
 
-        return isQueryParameter ? "dynamic?" : "string?";
+        return "string?";
     }
 
     private static string BuildRequestBodyCreationBlock(
@@ -952,11 +919,45 @@ $$"""
         return string.Empty;
     }
 
+    private static string BuildFacadeReturnStatement(KiotaOperationMetadata? operation)
+    {
+        if (operation is null)
+            return "return result;";
+
+        if (!operation.IsCollectionWrapper)
+            return "return result;";
+
+        if (string.IsNullOrWhiteSpace(operation.CollectionPropertyName))
+            throw new InvalidOperationException($"A collection wrapper return for '{operation.OperationId}' is missing its collection property metadata.");
+
+        return $"return result?.{operation.CollectionPropertyName}?.ToList();";
+    }
+
     private static bool IsIgnoredRequestBodyProperty(string propertyName)
     {
         return propertyName.Equals("AdditionalData", StringComparison.OrdinalIgnoreCase)
             || propertyName.Equals("BackingStore", StringComparison.OrdinalIgnoreCase)
             || propertyName.Equals("OdataType", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolvePathParameterType(
+        string groupName,
+        ApiEndpointDefinition endpoint,
+        ApiParameterDefinition parameter,
+        KiotaClientMetadata kiotaMetadata)
+    {
+        var operation = ResolveKiotaOperation(groupName, endpoint, kiotaMetadata);
+
+        if (operation is null)
+            throw new InvalidOperationException($"Unable to resolve Kiota operation for path parameter '{parameter.Name}' in {endpoint.Method} {endpoint.Path}.");
+
+        var pathParameter = operation.PathParameters.FirstOrDefault(x =>
+            x.Name.Equals(parameter.Name, StringComparison.OrdinalIgnoreCase));
+
+        if (pathParameter is null || string.IsNullOrWhiteSpace(pathParameter.TypeName))
+            throw new InvalidOperationException($"Unable to resolve Kiota type for path parameter '{parameter.Name}' in {endpoint.Method} {endpoint.Path}.");
+
+        return NormalizeGeneratedTypeName(pathParameter.TypeName);
     }
 
     private static string BuildFacadeArgumentsFromService(
@@ -1048,7 +1049,7 @@ $$"""
         if (string.IsNullOrWhiteSpace(configBlock))
             return $"{builderChain}.{asyncMethodName}({bodyArgument}cancellationToken: cancellationToken)";
 
-        return $"{builderChain}.{asyncMethodName}({bodyArgument}new System.Action<dynamic>(config =>{Environment.NewLine}        {{{Environment.NewLine}{configBlock}{Environment.NewLine}        }}), cancellationToken: cancellationToken)";
+        return $"{builderChain}.{asyncMethodName}({bodyArgument}config =>{Environment.NewLine}        {{{Environment.NewLine}{configBlock}{Environment.NewLine}        }}, cancellationToken: cancellationToken)";
     }
 
     private static string BuildKiotaBuilderChain(
@@ -1155,7 +1156,7 @@ $$"""
         var operation = ResolveKiotaOperation(groupName, endpoint, kiotaMetadata);
 
         if (operation is null || string.IsNullOrWhiteSpace(operation.ReturnTypeName))
-            return "object?";
+            throw new InvalidOperationException($"Unable to resolve Kiota return type for {endpoint.Method} {endpoint.Path}.");
 
         var normalized = NormalizeGeneratedTypeName(operation.ReturnTypeName);
 
@@ -1177,7 +1178,7 @@ $$"""
         var operation = ResolveKiotaOperation(groupName, endpoint, kiotaMetadata);
 
         if (operation is null || string.IsNullOrWhiteSpace(operation.RequestBodyTypeName))
-            return "dynamic";
+            throw new InvalidOperationException($"Unable to resolve Kiota request body type for {endpoint.Method} {endpoint.Path}.");
 
         return NormalizeGeneratedTypeName(operation.RequestBodyTypeName);
     }
@@ -1353,25 +1354,15 @@ $$"""
         var parameterName = ToCamelCase(NormalizeIdentifier(pathParameterName));
 
         if (operation is null || operation.PathParameters.Count == 0)
-            return BuildFallbackPathAccess(pathParameterName, parameterName);
+            throw new InvalidOperationException($"Unable to resolve Kiota path navigation for parameter '{pathParameterName}'.");
 
         var metadata = operation.PathParameters.FirstOrDefault(x =>
             x.Name.Equals(pathParameterName, StringComparison.OrdinalIgnoreCase));
 
         if (metadata is null || string.IsNullOrWhiteSpace(metadata.AccessExpression))
-            return BuildFallbackPathAccess(pathParameterName, parameterName);
+            throw new InvalidOperationException($"Unable to resolve Kiota access expression for path parameter '{pathParameterName}'.");
 
         return metadata.AccessExpression;
-    }
-
-    private static string BuildFallbackPathAccess(string pathParameterName, string parameterName)
-    {
-        var normalizedParameter = NormalizeIdentifier(pathParameterName);
-
-        if (normalizedParameter.EndsWith("Id", StringComparison.OrdinalIgnoreCase))
-            return $".By{normalizedParameter}({parameterName})";
-
-        return $"[{parameterName}]";
     }
 
     private static string GetKiotaAsyncMethodName(string httpMethod)
@@ -1454,7 +1445,7 @@ $$"""
     private static string NormalizeGeneratedTypeName(string typeName)
     {
         if (string.IsNullOrWhiteSpace(typeName))
-            return "object?";
+            throw new InvalidOperationException("A generated Kiota type name was expected, but none was found.");
 
         return typeName.Trim() switch
         {
