@@ -1,0 +1,7 @@
+namespace Golden.Sample.Core.Dtos;
+
+public enum LoginPostRequestBody_providerDto
+{
+    Google,
+    Apple,
+}

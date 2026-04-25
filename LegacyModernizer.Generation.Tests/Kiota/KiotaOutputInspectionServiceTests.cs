@@ -353,6 +353,200 @@ public sealed class KiotaOutputInspectionServiceTests : IDisposable
         Assert.Equal("[new Fake.Client.Businesses.BusinessesRequestBuilderPathParameters { Id = id }]", pathParameter.AccessExpression);
     }
 
+    [Fact]
+    public async Task InspectAsync_DetectsCollectionWrapperResponsesUsingValueProperty()
+    {
+        WriteFile(
+            "ApiClient.cs",
+            """
+            namespace Fake.Client;
+
+            public partial class FakeApiClient
+            {
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Businesses", "BusinessesRequestBuilder.cs"),
+            """
+            namespace Fake.Client.Businesses;
+
+            public class BusinessesRequestBuilder
+            {
+                public async global::System.Threading.Tasks.Task<global::Fake.Client.Models.BusinessPageResponse?> GetAsync(global::System.Action<object>? requestConfiguration = default, global::System.Threading.CancellationToken cancellationToken = default)
+                {
+                    await global::System.Threading.Tasks.Task.CompletedTask;
+                    return default;
+                }
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Models", "BusinessPageResponse.cs"),
+            """
+            namespace Fake.Client.Models;
+
+            public class BusinessPageResponse
+            {
+                public global::System.Collections.Generic.List<global::Fake.Client.Models.BusinessResponse>? Value { get; set; }
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Models", "BusinessResponse.cs"),
+            """
+            namespace Fake.Client.Models;
+
+            public class BusinessResponse
+            {
+                public string? Id { get; set; }
+            }
+            """);
+
+        var artifact = new GeneratedArtifact(
+            ArtifactType.GeneratedClient,
+            new ArtifactLocation(_clientRootPath),
+            ExecutionStep.ClientGeneration);
+
+        var apiGroups = new[]
+        {
+            new ApiGroupDefinition
+            {
+                Name = "Businesses",
+                Endpoints =
+                [
+                    new ApiEndpointDefinition
+                    {
+                        Path = "/v1/businesses",
+                        Method = "GET"
+                    }
+                ]
+            }
+        };
+
+        var service = new KiotaOutputInspectionService();
+
+        var metadata = await service.InspectAsync(artifact, apiGroups);
+        var businessesGroup = Assert.Single(metadata.Groups, x => x.GroupName == "Businesses");
+        var operation = Assert.Single(businessesGroup.Operations, x => x.HttpMethod == "GET");
+
+        Assert.Equal("Fake.Client.Models.BusinessResponse", operation.ReturnTypeName);
+        Assert.True(operation.IsCollection);
+        Assert.True(operation.IsCollectionWrapper);
+        Assert.Equal("Value", operation.CollectionPropertyName);
+    }
+
+    [Fact]
+    public async Task InspectAsync_ExtractsRequestBodyPropertiesIgnoringFrameworkProperties()
+    {
+        WriteFile(
+            "ApiClient.cs",
+            """
+            namespace Fake.Client;
+
+            public partial class FakeApiClient
+            {
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Authentication", "Login", "LoginRequestBuilder.cs"),
+            """
+            namespace Fake.Client.Authentication.Login;
+
+            public class LoginRequestBuilder
+            {
+                public async global::System.Threading.Tasks.Task<global::Fake.Client.Models.AuthResponse?> PostAsync(global::Fake.Client.Authentication.Login.LoginPostRequestBody body, global::System.Action<object>? requestConfiguration = default, global::System.Threading.CancellationToken cancellationToken = default)
+                {
+                    await global::System.Threading.Tasks.Task.CompletedTask;
+                    return default;
+                }
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Authentication", "Login", "LoginPostRequestBody.cs"),
+            """
+            namespace Fake.Client.Authentication.Login;
+
+            public class LoginPostRequestBody
+            {
+                public string? Email { get; set; }
+                public global::Fake.Client.Authentication.Login.LoginPostRequestBody_provider? Provider { get; set; }
+                public global::System.Collections.Generic.IDictionary<string, object>? AdditionalData { get; set; }
+                public object? BackingStore { get; set; }
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Authentication", "Login", "LoginPostRequestBody_provider.cs"),
+            """
+            namespace Fake.Client.Authentication.Login;
+
+            public enum LoginPostRequestBody_provider
+            {
+                Google,
+                Apple,
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Models", "AuthResponse.cs"),
+            """
+            namespace Fake.Client.Models;
+
+            public class AuthResponse
+            {
+                public string? AccessToken { get; set; }
+            }
+            """);
+
+        var artifact = new GeneratedArtifact(
+            ArtifactType.GeneratedClient,
+            new ArtifactLocation(_clientRootPath),
+            ExecutionStep.ClientGeneration);
+
+        var apiGroups = new[]
+        {
+            new ApiGroupDefinition
+            {
+                Name = "Login",
+                Endpoints =
+                [
+                    new ApiEndpointDefinition
+                    {
+                        Path = "/v1/authentication/login",
+                        Method = "POST",
+                        OperationId = "Login",
+                        HasRequestBody = true
+                    }
+                ]
+            }
+        };
+
+        var service = new KiotaOutputInspectionService();
+
+        var metadata = await service.InspectAsync(artifact, apiGroups);
+        var loginGroup = Assert.Single(metadata.Groups, x => x.GroupName == "Login");
+        var operation = Assert.Single(loginGroup.Operations, x => x.HttpMethod == "POST");
+
+        Assert.Equal("Fake.Client.Authentication.Login.LoginPostRequestBody", operation.RequestBodyTypeName);
+        Assert.Collection(
+            operation.RequestBodyProperties,
+            property =>
+            {
+                Assert.Equal("Email", property.Name);
+                Assert.Equal("string?", property.TypeName);
+                Assert.True(property.IsNullable);
+            },
+            property =>
+            {
+                Assert.Equal("Provider", property.Name);
+                Assert.Equal("Fake.Client.Authentication.Login.LoginPostRequestBody_provider?", property.TypeName);
+                Assert.True(property.IsNullable);
+            });
+    }
+
     private void WriteFile(string relativePath, string content)
     {
         var fullPath = Path.Combine(_clientRootPath, relativePath);

@@ -185,6 +185,13 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
             normalizedGroups,
             kiotaMetadata);
 
+        CreateGenerationManifestFile(
+            solutionRootPath,
+            request,
+            normalizedGroups,
+            kiotaMetadata,
+            dtoContext);
+
         CreateReadmeFile(
             solutionRootPath,
             request,
@@ -1070,6 +1077,127 @@ The generated facade follows the partial class pattern, allowing each API area t
 """;
 
         File.WriteAllText(filePath, content);
+    }
+
+    private static void CreateGenerationManifestFile(
+        string solutionRootPath,
+        ModernizationRequest request,
+        IReadOnlyCollection<ApiGroupDefinition> groups,
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
+    {
+        var filePath = Path.Combine(solutionRootPath, "generation-manifest.json");
+
+        var manifest = new
+        {
+            projectName = request.ProjectName.ToString(),
+            baseNamespace = request.BaseNamespace.ToString(),
+            targetFramework = request.TargetFramework,
+            generatedClientRootNamespace = kiotaMetadata.RootNamespace,
+            generatedClientClassName = kiotaMetadata.ClientClassName,
+            dtoMappings = dtoContext.SourceToDtoTypeName
+                .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(x => new
+                {
+                    sourceType = x.Key,
+                    dtoType = x.Value
+                })
+                .ToArray(),
+            groups = groups
+                .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(group => BuildManifestGroup(group, kiotaMetadata, dtoContext))
+                .ToArray()
+        };
+
+        var content = System.Text.Json.JsonSerializer.Serialize(
+            manifest,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+
+        File.WriteAllText(filePath, content);
+    }
+
+    private static object BuildManifestGroup(
+        ApiGroupDefinition group,
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
+    {
+        return new
+        {
+            name = group.Name,
+            endpoints = group.Endpoints
+                .OrderBy(x => x.Method, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
+                .Select(endpoint => BuildManifestEndpoint(group.Name, endpoint, kiotaMetadata, dtoContext))
+                .ToArray()
+        };
+    }
+
+    private static object BuildManifestEndpoint(
+        string groupName,
+        ApiEndpointDefinition endpoint,
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
+    {
+        var operation = ResolveKiotaOperation(
+            groupName,
+            endpoint,
+            kiotaMetadata,
+            allowCrossMethodPathFallback: false);
+
+        return new
+        {
+            method = endpoint.Method,
+            path = endpoint.Path,
+            operationId = endpoint.OperationId,
+            generatedMethodName = NormalizeMethodName(endpoint.OperationId, endpoint.Path, endpoint.Method),
+            requiresAuthorization = endpoint.RequiresAuthorization,
+            hasRequestBody = endpoint.HasRequestBody,
+            kiota = operation is null
+                ? null
+                : new
+                {
+                    methodName = operation.MethodName,
+                    httpMethod = operation.HttpMethod,
+                    endpointPath = operation.EndpointPath,
+                    accessExpression = operation.AccessExpression,
+                    returnTypeName = operation.ReturnTypeName,
+                    requestBodyTypeName = operation.RequestBodyTypeName,
+                    isCollection = operation.IsCollection,
+                    isCollectionWrapper = operation.IsCollectionWrapper,
+                    collectionPropertyName = operation.CollectionPropertyName,
+                    pathParameters = operation.PathParameters
+                        .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                        .Select(x => new
+                        {
+                            name = x.Name,
+                            typeName = x.TypeName,
+                            accessExpression = x.AccessExpression
+                        })
+                        .ToArray()
+                },
+            contracts = new
+            {
+                returnType = ResolveContractReturnType(groupName, endpoint, kiotaMetadata, dtoContext),
+                requestBodyType = endpoint.HasRequestBody
+                    ? ResolveContractRequestBodyType(groupName, endpoint, kiotaMetadata, dtoContext)
+                    : string.Empty
+            },
+            parameters = endpoint.Parameters
+                .OrderBy(x => x.Location, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(x => new
+                {
+                    name = x.Name,
+                    location = x.Location,
+                    required = x.Required,
+                    schemaType = x.SchemaType,
+                    schemaFormat = x.SchemaFormat
+                })
+                .ToArray()
+        };
     }
 
     private static string BuildFacadeInterfaceMethods(

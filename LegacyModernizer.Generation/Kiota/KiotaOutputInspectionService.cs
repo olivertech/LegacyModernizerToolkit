@@ -1303,7 +1303,7 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         // Look for "public List<T> Value" or "public ICollection<T> Value" property
         var collectionPropertyMatch = System.Text.RegularExpressions.Regex.Match(
             content,
-            @"public\s+(List|IList|ICollection|IEnumerable)<(?<innerType>[^>]+)>\???\s+(?<propertyName>Value|Items)\s*\{\s*get",
+            @"public\s+(?:global::)?(?:System\.Collections\.Generic\.)?(List|IList|ICollection|IEnumerable)<(?<innerType>[^>]+)>\???\s+(?<propertyName>Value|Items)\s*\{\s*get",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         if (collectionPropertyMatch.Success)

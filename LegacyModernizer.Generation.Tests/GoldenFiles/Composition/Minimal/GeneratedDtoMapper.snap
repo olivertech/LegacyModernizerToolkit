@@ -1,0 +1,57 @@
+using System.Collections;
+using System.Collections.Generic;
+using System.Text.Json;
+
+namespace Golden.Sample.Infrastructure.Mappers;
+
+internal static class GeneratedDtoMapper
+{
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    public static TTarget? Map<TTarget>(object? source)
+    {
+        if (source is null)
+            return default;
+
+        if (source is TTarget typedTarget)
+            return typedTarget;
+
+        var json = JsonSerializer.Serialize(source, Options);
+        return JsonSerializer.Deserialize<TTarget>(json, Options);
+    }
+
+    public static TTarget MapRequired<TTarget>(object source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (source is TTarget typedTarget)
+            return typedTarget;
+
+        var json = JsonSerializer.Serialize(source, Options);
+        return JsonSerializer.Deserialize<TTarget>(json, Options)
+               ?? throw new InvalidOperationException($"Unable to map source to {typeof(TTarget).FullName}.");
+    }
+
+    public static List<TTarget>? MapList<TTarget>(IEnumerable? source)
+    {
+        if (source is null)
+            return null;
+
+        var items = new List<TTarget>();
+
+        foreach (var item in source)
+        {
+            var mapped = Map<TTarget>(item);
+
+            if (mapped is null)
+                continue;
+
+            items.Add(mapped);
+        }
+
+        return items;
+    }
+}

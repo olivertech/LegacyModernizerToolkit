@@ -1,0 +1,12 @@
+using System.Threading;
+using System.Threading.Tasks;
+using Golden.Sample.Core.Dtos;
+
+namespace Golden.Sample.Core.Interfaces;
+
+public interface IApiFacade
+{
+    Task<UserProfileResponseDto?> GETAuthenticationMeAsync(CancellationToken cancellationToken = default);
+
+    Task<AuthResponseDto?> POSTAuthenticationLoginAsync(LoginPostRequestBodyDto request, CancellationToken cancellationToken = default);
+}

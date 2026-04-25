@@ -32,4 +32,9 @@
     <Folder Include="Templates\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="GoldenFiles\**\*.cs" />
+    <None Include="GoldenFiles\**\*" />
+  </ItemGroup>
+
 </Project>

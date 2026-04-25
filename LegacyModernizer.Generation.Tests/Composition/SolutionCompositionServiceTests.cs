@@ -1,6 +1,10 @@
 using System.Reflection;
+using System.Text.Json;
 using LegacyModernizer.Application.DTOs.Common;
 using LegacyModernizer.Application.DTOs.Commons;
+using LegacyModernizer.Domain.Entities;
+using LegacyModernizer.Domain.Enums;
+using LegacyModernizer.Domain.ValueObjects;
 using LegacyModernizer.Generation.Composition;
 
 namespace LegacyModernizer.Generation.Tests.Composition;
@@ -25,6 +29,17 @@ public sealed class SolutionCompositionServiceTests
             .SetValue(instance, Path.GetTempPath());
 
         return instance!;
+    }
+
+    private static void AddDtoMapping(object dtoContext, string sourceTypeName, string dtoTypeName)
+    {
+        var sourceToDtoTypeName = dtoContext.GetType()
+            .GetProperty("SourceToDtoTypeName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
+            .GetValue(dtoContext);
+
+        var addMethod = sourceToDtoTypeName!.GetType().GetMethod("Add", [typeof(string), typeof(string)]);
+        Assert.NotNull(addMethod);
+        addMethod!.Invoke(sourceToDtoTypeName, [sourceTypeName, dtoTypeName]);
     }
 
     [Fact]
@@ -157,6 +172,201 @@ public sealed class SolutionCompositionServiceTests
         Assert.Contains("#pragma warning disable CS0618", methodBody, StringComparison.Ordinal);
         Assert.Contains("_apiClient.Notifications[id].GetAsync", methodBody, StringComparison.Ordinal);
         Assert.Contains("#pragma warning restore CS0618", methodBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildFacadeMethodParameters_IncludesRequestQueryHeaderAndAuthorizationParameters()
+    {
+        var endpoint = new ApiEndpointDefinition
+        {
+            Path = "/v1/reports/{id}",
+            Method = "POST",
+            HasRequestBody = true,
+            RequiresAuthorization = true,
+            Parameters =
+            [
+                new ApiParameterDefinition
+                {
+                    Name = "id",
+                    Location = "path",
+                    Required = true,
+                    SchemaType = "integer",
+                    SchemaFormat = "int32"
+                },
+                new ApiParameterDefinition
+                {
+                    Name = "includeArchived",
+                    Location = "query",
+                    SchemaType = "boolean"
+                },
+                new ApiParameterDefinition
+                {
+                    Name = "x-correlation-id",
+                    Location = "header"
+                }
+            ]
+        };
+
+        var metadata = new KiotaClientMetadata
+        {
+            Groups =
+            [
+                new KiotaGroupMetadata
+                {
+                    GroupName = "Reports",
+                    BuilderAccessExpression = "Reports",
+                    Operations =
+                    [
+                        new KiotaOperationMetadata
+                        {
+                            HttpMethod = "POST",
+                            EndpointPath = "reports/{param}",
+                            RequestBodyTypeName = "Fake.Client.Reports.ReportsPostRequestBody"
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var method = typeof(SolutionCompositionService).GetMethod(
+            "BuildFacadeMethodParameters",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        var dtoContext = CreateDtoContext();
+        AddDtoMapping(dtoContext, "Fake.Client.Reports.ReportsPostRequestBody", "ReportsPostRequestBodyDto");
+
+        var parameters = (string?)method!.Invoke(
+            null,
+            [ "Reports", endpoint, metadata, dtoContext ]);
+
+        Assert.Equal(
+            "int? id, ReportsPostRequestBodyDto request, bool? includeArchived, string? xCorrelationId = null, string? accessToken = null, CancellationToken cancellationToken = default",
+            parameters);
+    }
+
+    [Fact]
+    public void BuildFacadeMethodBody_MapsCollectionWrapperResponsesToContractLists()
+    {
+        var method = typeof(SolutionCompositionService).GetMethod(
+            "BuildFacadeMethodBody",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        var operation = new KiotaOperationMetadata
+        {
+            OperationId = "GetBusinesses",
+            IsCollection = true,
+            IsCollectionWrapper = true,
+            CollectionPropertyName = "Value"
+        };
+
+        var methodBody = (string?)method!.Invoke(
+            null,
+            [ "List<BusinessResponseDto>?", operation, "_apiClient.Businesses.GetAsync(cancellationToken: cancellationToken)", string.Empty ]);
+
+        Assert.NotNull(methodBody);
+        Assert.Contains("var result = await _apiClient.Businesses.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);", methodBody, StringComparison.Ordinal);
+        Assert.Contains("return GeneratedDtoMapper.MapList<BusinessResponseDto>(result?.Value);", methodBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreateGenerationManifestFile_IncludesKiotaAndContractMetadata()
+    {
+        var tempRootPath = Path.Combine(Path.GetTempPath(), "LegacyModernizerTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRootPath);
+
+        try
+        {
+            var request = new ModernizationRequest(
+                new SpecificationSource(SpecificationSourceType.File, Path.Combine(tempRootPath, "openapi.json")),
+                new ProjectName("ManifestSample"),
+                new NamespaceName("Manifest.Sample"),
+                "net8.0");
+
+            var groups = new[]
+            {
+                new ApiGroupDefinition
+                {
+                    Name = "Businesses",
+                    Endpoints =
+                    [
+                        new ApiEndpointDefinition
+                        {
+                            Path = "/v1/businesses",
+                            Method = "GET"
+                        }
+                    ]
+                }
+            };
+
+            var metadata = new KiotaClientMetadata
+            {
+                RootNamespace = "Fake.Client",
+                ClientClassName = "ApiClient",
+                Groups =
+                [
+                    new KiotaGroupMetadata
+                    {
+                        GroupName = "Businesses",
+                        BuilderAccessExpression = "Businesses",
+                        Operations =
+                        [
+                            new KiotaOperationMetadata
+                            {
+                                HttpMethod = "GET",
+                                MethodName = "GetAsync",
+                                EndpointPath = "businesses",
+                                AccessExpression = string.Empty,
+                                ReturnTypeName = "Fake.Client.Models.BusinessResponse",
+                                IsCollection = true,
+                                IsCollectionWrapper = true,
+                                CollectionPropertyName = "Value"
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            var dtoContext = CreateDtoContext();
+            AddDtoMapping(dtoContext, "Fake.Client.Models.BusinessResponse", "BusinessResponseDto");
+
+            var method = typeof(SolutionCompositionService).GetMethod(
+                "CreateGenerationManifestFile",
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.NotNull(method);
+
+            method!.Invoke(null, [ tempRootPath, request, groups, metadata, dtoContext ]);
+
+            var manifestPath = Path.Combine(tempRootPath, "generation-manifest.json");
+            Assert.True(File.Exists(manifestPath));
+
+            using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            var root = document.RootElement;
+
+            Assert.Equal("ManifestSample", root.GetProperty("projectName").GetString());
+
+            var dtoMappings = root.GetProperty("dtoMappings");
+            Assert.Equal("Fake.Client.Models.BusinessResponse", dtoMappings[0].GetProperty("sourceType").GetString());
+            Assert.Equal("BusinessResponseDto", dtoMappings[0].GetProperty("dtoType").GetString());
+
+            var endpoint = root.GetProperty("groups")[0].GetProperty("endpoints")[0];
+            var kiota = endpoint.GetProperty("kiota");
+            var contracts = endpoint.GetProperty("contracts");
+
+            Assert.True(kiota.GetProperty("isCollection").GetBoolean());
+            Assert.True(kiota.GetProperty("isCollectionWrapper").GetBoolean());
+            Assert.Equal("Value", kiota.GetProperty("collectionPropertyName").GetString());
+            Assert.Equal("List<BusinessResponseDto>?", contracts.GetProperty("returnType").GetString());
+        }
+        finally
+        {
+            if (Directory.Exists(tempRootPath))
+                Directory.Delete(tempRootPath, recursive: true);
+        }
     }
 
     [Fact]

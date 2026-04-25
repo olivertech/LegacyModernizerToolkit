@@ -1,0 +1,30 @@
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Kiota.Abstractions;
+using Golden.Sample.Core.Dtos;
+using Golden.Sample.Infrastructure.Mappers;
+
+namespace Golden.Sample.Infrastructure.Facades;
+
+public sealed partial class ApiFacade
+{
+    public async Task<UserProfileResponseDto?> GETAuthenticationMeAsync(CancellationToken cancellationToken = default)
+    {
+        var result = await _apiClient.Authentication.Me.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return GeneratedDtoMapper.Map<UserProfileResponseDto>(result);
+
+    }
+
+    public async Task<AuthResponseDto?> POSTAuthenticationLoginAsync(LoginPostRequestBodyDto request, CancellationToken cancellationToken = default)
+    {
+        var kiotaRequest = GeneratedDtoMapper.MapRequired<Fake.Client.Authentication.Login.LoginPostRequestBody>(request);
+
+        var result = await _apiClient.Authentication.Login.PostAsync(kiotaRequest, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return GeneratedDtoMapper.Map<AuthResponseDto>(result);
+
+    }
+}

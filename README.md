@@ -1,5 +1,20 @@
 Descrição do projeto
 <br><br>
+Testes de geraÃ§Ã£o
+<br><br>
+O projeto possui testes de regressÃ£o da soluÃ§Ã£o gerada em `LegacyModernizer.Generation.Tests`.
+<br><br>
+Os arquivos de comparaÃ§Ã£o dos golden tests usam extensÃ£o `.snap` em vez de `.cs`.
+<br><br>
+Motivo:
+<br><br>
+â€¢ `.snap` deixa claro que o arquivo Ã© um snapshot de comparaÃ§Ã£o<br>
+â€¢ evita que o SDK do .NET trate o arquivo como cÃ³digo-fonte compilÃ¡vel<br>
+â€¢ reduz conflito com os globs padrÃ£o de `Compile` do projeto de testes<br>
+â€¢ facilita a manutenÃ§Ã£o de artefatos esperados como `IApiFacade`, `ApiFacade.*`, `Dtos`, `Mappers` e `generation-manifest.json`
+<br><br>
+Na prÃ¡tica, os golden tests validam o conteÃºdo da saÃ­da gerada comparando os arquivos reais com os snapshots versionados.
+<br><br>
 Uma ferramenta para acelerar a modernização de APIs legadas em .NET, padronizando consumo, reduzindo acoplamento e melhorando arquitetura. Ou seja, é gerar uma solução .NET modernizada, a partir de uma spec Swagger/OpenAPI.
 <br><br>
 O que o toolkit entrega:

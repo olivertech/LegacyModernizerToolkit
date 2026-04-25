@@ -1,0 +1,82 @@
+{
+  "projectName": "GoldenSample",
+  "baseNamespace": "Golden.Sample",
+  "targetFramework": "net8.0",
+  "generatedClientRootNamespace": "Fake.Client",
+  "generatedClientClassName": "ApiClient",
+  "dtoMappings": [
+    {
+      "sourceType": "Fake.Client.Authentication.Login.LoginPostRequestBody",
+      "dtoType": "LoginPostRequestBodyDto"
+    },
+    {
+      "sourceType": "Fake.Client.Authentication.Login.LoginPostRequestBody_provider",
+      "dtoType": "LoginPostRequestBody_providerDto"
+    },
+    {
+      "sourceType": "Fake.Client.Models.AuthResponse",
+      "dtoType": "AuthResponseDto"
+    },
+    {
+      "sourceType": "Fake.Client.Models.UserProfileResponse",
+      "dtoType": "UserProfileResponseDto"
+    }
+  ],
+  "groups": [
+    {
+      "name": "Authentication",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/authentication/me",
+          "operationId": "GetMe",
+          "generatedMethodName": "GETAuthenticationMe",
+          "requiresAuthorization": false,
+          "hasRequestBody": false,
+          "kiota": {
+            "methodName": "GetAsync",
+            "httpMethod": "GET",
+            "endpointPath": "authentication/me",
+            "accessExpression": "Me",
+            "returnTypeName": "Fake.Client.Models.UserProfileResponse?",
+            "requestBodyTypeName": "",
+            "isCollection": false,
+            "isCollectionWrapper": false,
+            "collectionPropertyName": null,
+            "pathParameters": []
+          },
+          "contracts": {
+            "returnType": "UserProfileResponseDto?",
+            "requestBodyType": ""
+          },
+          "parameters": []
+        },
+        {
+          "method": "POST",
+          "path": "/v1/authentication/login",
+          "operationId": "Login",
+          "generatedMethodName": "POSTAuthenticationLogin",
+          "requiresAuthorization": false,
+          "hasRequestBody": true,
+          "kiota": {
+            "methodName": "PostAsync",
+            "httpMethod": "POST",
+            "endpointPath": "authentication/login",
+            "accessExpression": "Login",
+            "returnTypeName": "Fake.Client.Models.AuthResponse?",
+            "requestBodyTypeName": "Fake.Client.Authentication.Login.LoginPostRequestBody",
+            "isCollection": false,
+            "isCollectionWrapper": false,
+            "collectionPropertyName": null,
+            "pathParameters": []
+          },
+          "contracts": {
+            "returnType": "AuthResponseDto?",
+            "requestBodyType": "LoginPostRequestBodyDto"
+          },
+          "parameters": []
+        }
+      ]
+    }
+  ]
+}
