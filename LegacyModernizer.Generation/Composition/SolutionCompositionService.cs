@@ -691,7 +691,9 @@ The generated facade follows the partial class pattern, allowing each API area t
                 var operation = ResolveKiotaOperation(group.Name, x.Endpoint, kiotaMetadata);
 
                 var returnStatement = operation?.IsCollection == true
-                    ? "return result?.Value ?? [];"
+                    ? (operation.IsCollectionWrapper
+                        ? "return result?.Value ?? [];"
+                        : "return result;")
                     : "return result;";
 
                 return

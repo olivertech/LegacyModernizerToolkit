@@ -319,22 +319,24 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
 
         var rawReturnType = CleanTypeName(signature.ReturnType);
         var isCollection = IsCollectionReturnType(rawReturnType);
+        var isCollectionWrapper = false;
         var returnType = rawReturnType;
 
-        // Check if the return type is a wrapper response with a Value collection property
-        if (!isCollection && !rawReturnType.Equals("object?", StringComparison.OrdinalIgnoreCase))
+        // Direct collection return (Task<List<T>> etc.)
+        if (isCollection)
         {
+            returnType = ExtractInnerTypeFromCollection(rawReturnType);
+        }
+        else if (!rawReturnType.Equals("object?", StringComparison.OrdinalIgnoreCase))
+        {
+            // Wrapper response with Value collection property
             var collectionItemType = ExtractCollectionItemTypeFromWrapperResponse(clientRootPath, rawReturnType);
             if (!string.IsNullOrWhiteSpace(collectionItemType))
             {
                 isCollection = true;
+                isCollectionWrapper = true;
                 returnType = collectionItemType;
             }
-        }
-
-        if (isCollection && returnType.Equals(rawReturnType, StringComparison.Ordinal))
-        {
-            returnType = ExtractInnerTypeFromCollection(rawReturnType);
         }
 
         var requestBodyType = DetectRequestBodyTypeName(asyncMethodName, signature.ParametersText);
@@ -365,6 +367,7 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             EndpointPath = NormalizeOpenApiPath(endpoint.Path),
             RequestBodyProperties = bodyProperties,
             IsCollection = isCollection,
+            IsCollectionWrapper = isCollectionWrapper,
             PathParameters = pathParameters
         };
     }
@@ -555,19 +558,21 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         if (string.IsNullOrWhiteSpace(parentBuilderFile) || !File.Exists(parentBuilderFile))
             return $"[{parameterName}]";
 
-        var content = File.ReadAllText(parentBuilderFile);
+        var parentContent = File.ReadAllText(parentBuilderFile);
+        var builderContent = File.ReadAllText(builderFile);
 
         // Prefer ByXxx methods over indexers (to avoid obsolete string indexers)
-        var byMethod = FindByMethodForParameter(content, originalParameterName, parameterName);
+        var byMethod = FindByMethodForParameter(parentContent, originalParameterName, parameterName)
+            ?? FindByMethodForParameter(builderContent, originalParameterName, parameterName);
 
         if (!string.IsNullOrWhiteSpace(byMethod))
             return $".{byMethod}({parameterName})";
 
-        // Fall back to indexer only if no ByXxx method found
-        if (HasIndexerForParameter(content, parameterName))
+        // Fall back to typed indexer only (avoid obsolete string indexer)
+        if (HasTypedIndexerForParameter(parentContent) || HasTypedIndexerForParameter(builderContent))
             return $"[{parameterName}]";
 
-        // Default: assume indexer syntax
+        // Default: indexer if nothing else is available
         return $"[{parameterName}]";
     }
 
@@ -613,6 +618,25 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
     {
         return content.Contains("this[", StringComparison.OrdinalIgnoreCase)
             && content.Contains(parameterName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasTypedIndexerForParameter(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return false;
+
+        var typedIndexerMatch = System.Text.RegularExpressions.Regex.Match(
+            content,
+            @"this\[(?<type>[A-Za-z0-9_.]+)\s+[A-Za-z0-9_]+\]",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        if (!typedIndexerMatch.Success)
+            return false;
+
+        var typeName = typedIndexerMatch.Groups["type"].Value.Trim();
+
+        // Avoid obsolete string indexer
+        return !typeName.Equals("string", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? FindByMethodForParameter(
@@ -961,14 +985,14 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         var content = File.ReadAllText(filePath);
 
         // Look for "public List<T> Value" or "public ICollection<T> Value" property
-        var valuePropertyMatch = System.Text.RegularExpressions.Regex.Match(
+        var collectionPropertyMatch = System.Text.RegularExpressions.Regex.Match(
             content,
-            @"public\s+(List|IList|ICollection|IEnumerable)<(?<innerType>[^>]+)>\???\s+Value\s*\{\s*get",
+            @"public\s+(List|IList|ICollection|IEnumerable)<(?<innerType>[^>]+)>\???\s+(Value|Items)\s*\{\s*get",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
-        if (valuePropertyMatch.Success)
+        if (collectionPropertyMatch.Success)
         {
-            var innerType = valuePropertyMatch.Groups["innerType"].Value.Trim();
+            var innerType = collectionPropertyMatch.Groups["innerType"].Value.Trim();
             return CleanTypeName(innerType);
         }
 

@@ -1,49 +1,41 @@
-# Kiota Output Fix Tasks
+# LegacyModernizerToolkit Kiota Output Fix Tasks
 
 ## Overview
 
-This document tracks fixes to the LegacyModernizer.Generation code generator to eliminate build errors (CS0029, CS1977) and reduce warnings (CS0618, CS8603) in generated solutions. All generator corrections will be applied in two logical phases, followed by validation.
+This document tracks the execution of fixes to the code generator in LegacyModernizer.Generation to eliminate compilation errors and warnings in generated Kiota-based solutions.
 
-**Progress**: 1/3 tasks complete (33%) ![0%](https://progress-bar.xyz/33)
+**Progress**: 0/2 tasks complete (0%) ![0%](https://progress-bar.xyz/0)
 
 ---
 
 ## Tasks
 
-### [✓] TASK-001: Fix operation/return resolution and collection mapping *(Completed: 2026-04-25 04:00)*
-**References**: Plan §Project: LegacyModernizer.Generation (steps 1-2), Plan §Project: LegacyModernizer.Generation (Kiota inspector)
+### [▶] TASK-001: Fix code generator to eliminate compilation errors in generated output
+**References**: Plan §Project-by-Project Plans (LegacyModernizer.Generation), Plan §Error & Warning Mapping
 
-- [✓] (1) Update `ResolveKiotaOperation` method in `SolutionCompositionService.cs` to correctly map operations by path + access expression per Plan §Migration Steps item 1
-- [✓] (2) Update `ResolveReturnType` method in `SolutionCompositionService.cs` to identify collections in `*Response` types (Value/Items properties) per Plan §Migration Steps item 2
-- [✓] (3) Update `KiotaOutputInspectionService.cs` to detect `*Response` wrappers containing `public List<T> Value` or `ICollection<T> Value` per Plan §Project: LegacyModernizer.Generation (Kiota inspector)
-- [✓] (4) Propagate `IsCollection` and `ReturnTypeName` metadata with actual item types per Plan §Project: LegacyModernizer.Generation (Kiota inspector)
-- [✓] (5) Build `LegacyModernizer.Generation` project and verify no new compilation errors introduced (**Verify**)
-- [✓] (6) Commit changes with message: "TASK-001: Fix operation/return resolution and collection mapping (resolves CS0029)"
-
----
-
-### [▶] TASK-002: Fix builder chain generation and nullability
-**References**: Plan §Project: LegacyModernizer.Generation (steps 3-5)
-
-- [ ] (1) Update `BuildKiotaCallExpression` method in `SolutionCompositionService.cs` to generate typed calls and avoid dynamic lambda expressions per Plan §Migration Steps item 3
-- [ ] (2) Update `BuildKiotaBuilderChain` method in `SolutionCompositionService.cs` to prefer `ByXxx()` methods or typed indexers over obsolete `this[string]` indexer per Plan §Migration Steps item 4
-- [ ] (3) Adjust return type signatures in generated code templates to use nullable types (`T?`) or coalesce to empty collections (`result?.Value ?? []`) per Plan §Migration Steps item 5
-- [ ] (4) Build `LegacyModernizer.Generation` project and verify no compilation errors (**Verify**)
-- [ ] (5) Commit changes with message: "TASK-002: Fix builder chain generation and nullability (resolves CS1977, CS0618, CS8603)"
+- [ ] (1) Update ResolveKiotaOperation method to correctly map operations by path and access expression per Plan §Migration Steps
+- [ ] (2) Update ResolveReturnType method to identify collection wrappers with Value/Items properties per Plan §Migration Steps
+- [ ] (3) Update BuildKiotaCallExpression to generate typed calls avoiding dynamic lambda issues per Plan §Migration Steps
+- [ ] (4) Update BuildKiotaBuilderChain to prefer ByXxx methods and typed indexers over obsolete string indexer per Plan §Migration Steps
+- [ ] (5) Adjust return type handling for nullable types and collection coalescing per Plan §Migration Steps
+- [ ] (6) Update KiotaOutputInspectionService to detect *Response wrapper types with collection properties per Plan §Migration Steps (inspector)
+- [ ] (7) Add logic to distinguish direct collection returns from wrapper-based returns per Plan §Detailed Execution Steps (post-validation adjustments)
+- [ ] (8) Reinforce ByXxx and typed indexer detection to prevent CS1977/CS0618 per Plan §Detailed Execution Steps (post-validation adjustments)
+- [ ] (9) Build LegacyModernizer.Generation project
+- [ ] (10) Generator project builds with 0 errors (**Verify**)
+- [ ] (11) Commit changes with message: "TASK-001: Fix Kiota code generator to eliminate CS0029, CS1977, CS0618, CS8603"
 
 ---
 
-### [ ] TASK-003: Generate test solution and validate fixes
+### [ ] TASK-002: Validate generator fixes by building regenerated solution
 **References**: Plan §Testing & Validation Strategy, Plan §Success Criteria
 
-- [ ] (1) Generate reference solution (e.g., Ark.Infrastructure) using updated generator per Plan §Testing & Validation Strategy
-- [ ] (2) Generated solution created successfully (**Verify**)
-- [ ] (3) Execute `dotnet build` on generated solution
-- [ ] (4) Build output contains 0 CS0029 errors (**Verify**)
-- [ ] (5) Build output contains 0 CS1977 errors (**Verify**)
-- [ ] (6) Build output contains 0 compilation errors overall (**Verify**)
-- [ ] (7) Count CS0618 and CS8603 warnings in build output and verify reduction compared to baseline per Plan §Success Criteria (**Verify**)
+- [ ] (1) Regenerate modernized reference solution (e.g., Ark.Infrastructure) using updated generator
+- [ ] (2) Build generated solution with dotnet build
+- [ ] (3) CS0029 errors eliminated in build output (**Verify**)
+- [ ] (4) CS1977 errors eliminated in build output (**Verify**)
+- [ ] (5) CS0618 and CS8603 warnings reduced per Plan §Success Criteria (**Verify**)
+- [ ] (6) Generated solution builds with 0 errors (**Verify**)
+- [ ] (7) Commit validation with message: "TASK-002: Validate Kiota generator fixes - solution builds successfully"
 
 ---
-
-

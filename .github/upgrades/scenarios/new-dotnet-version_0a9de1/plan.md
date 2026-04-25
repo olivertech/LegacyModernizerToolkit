@@ -35,6 +35,8 @@ Correções **apenas no gerador** (`LegacyModernizer.Generation`) e re-geração da 
 2. Corrigir geração da cadeia de request builder e configuração (lambda) sem `dynamic`.
 3. Corrigir uso de indexer obsoleto em request builders.
 4. Ajustar nullability de retornos (`CS8603`).
+5. **Ajuste pós-validação**: distinguir coleções diretas (`Task<List<T>>`) de wrappers com `Value` e usar retorno correto.
+6. **Ajuste pós-validação**: reforçar detecção de `ByXxx()` e indexer tipado para evitar `CS1977/CS0618`.
 
 ## Detailed Dependency Analysis
 ### Origem dos erros
@@ -75,7 +77,8 @@ Correções **apenas no gerador** (`LegacyModernizer.Generation`) e re-geração da 
 | `CS1977` (lambda em operação dinâmica) | Cadeia de request builder resolve para `dynamic`/`object` | Gerar chamadas tipadas e evitar `object` intermediário |
 | `CS0618` (indexer obsoleto) | Uso de `this[string]` em request builder | Preferir `ByXxx(...)` ou indexer tipado conforme metadados |
 | `CS8603` (possível null) | Métodos retornam `T` porém result é `T?` | Tornar retorno `T?` ou coalescer (ex.: `result ?? new()` / `result?.Value ?? []`) |
-
+| `CS1061` (`List<T>` não contém `Value`) | Gerador sempre usa `result?.Value` para coleções | Distinguir coleções diretas e wrappers; usar `return result;` para `List<T>` |
+ 
 ## Breaking Changes Catalog
 - Nenhuma mudança de API pública no toolkit, apenas geração de código de saída.
 - Mudanças de assinatura de retorno no output (ex.: `List<T>` ? `List<T>` via `.Value`).
