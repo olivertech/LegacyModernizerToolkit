@@ -1137,7 +1137,11 @@ $$"""
         var normalized = NormalizeGeneratedTypeName(operation.ReturnTypeName);
 
         if (operation.IsCollection)
-            return $"List<{normalized}>";
+            return $"List<{normalized}>?";
+
+        // Make reference types nullable to avoid CS8603 warnings
+        if (!normalized.EndsWith("?", StringComparison.Ordinal))
+            return $"{normalized}?";
 
         return normalized;
     }

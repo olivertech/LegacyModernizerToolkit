@@ -4,25 +4,25 @@
 
 This document tracks fixes to the LegacyModernizer.Generation code generator to eliminate build errors (CS0029, CS1977) and reduce warnings (CS0618, CS8603) in generated solutions. All generator corrections will be applied in two logical phases, followed by validation.
 
-**Progress**: 0/3 tasks complete (0%) ![0%](https://progress-bar.xyz/0)
+**Progress**: 1/3 tasks complete (33%) ![0%](https://progress-bar.xyz/33)
 
 ---
 
 ## Tasks
 
-### [▶] TASK-001: Fix operation/return resolution and collection mapping
+### [✓] TASK-001: Fix operation/return resolution and collection mapping *(Completed: 2026-04-25 04:00)*
 **References**: Plan §Project: LegacyModernizer.Generation (steps 1-2), Plan §Project: LegacyModernizer.Generation (Kiota inspector)
 
-- [ ] (1) Update `ResolveKiotaOperation` method in `SolutionCompositionService.cs` to correctly map operations by path + access expression per Plan §Migration Steps item 1
-- [ ] (2) Update `ResolveReturnType` method in `SolutionCompositionService.cs` to identify collections in `*Response` types (Value/Items properties) per Plan §Migration Steps item 2
-- [ ] (3) Update `KiotaOutputInspectionService.cs` to detect `*Response` wrappers containing `public List<T> Value` or `ICollection<T> Value` per Plan §Project: LegacyModernizer.Generation (Kiota inspector)
-- [ ] (4) Propagate `IsCollection` and `ReturnTypeName` metadata with actual item types per Plan §Project: LegacyModernizer.Generation (Kiota inspector)
-- [ ] (5) Build `LegacyModernizer.Generation` project and verify no new compilation errors introduced (**Verify**)
-- [ ] (6) Commit changes with message: "TASK-001: Fix operation/return resolution and collection mapping (resolves CS0029)"
+- [✓] (1) Update `ResolveKiotaOperation` method in `SolutionCompositionService.cs` to correctly map operations by path + access expression per Plan §Migration Steps item 1
+- [✓] (2) Update `ResolveReturnType` method in `SolutionCompositionService.cs` to identify collections in `*Response` types (Value/Items properties) per Plan §Migration Steps item 2
+- [✓] (3) Update `KiotaOutputInspectionService.cs` to detect `*Response` wrappers containing `public List<T> Value` or `ICollection<T> Value` per Plan §Project: LegacyModernizer.Generation (Kiota inspector)
+- [✓] (4) Propagate `IsCollection` and `ReturnTypeName` metadata with actual item types per Plan §Project: LegacyModernizer.Generation (Kiota inspector)
+- [✓] (5) Build `LegacyModernizer.Generation` project and verify no new compilation errors introduced (**Verify**)
+- [✓] (6) Commit changes with message: "TASK-001: Fix operation/return resolution and collection mapping (resolves CS0029)"
 
 ---
 
-### [ ] TASK-002: Fix builder chain generation and nullability
+### [▶] TASK-002: Fix builder chain generation and nullability
 **References**: Plan §Project: LegacyModernizer.Generation (steps 3-5)
 
 - [ ] (1) Update `BuildKiotaCallExpression` method in `SolutionCompositionService.cs` to generate typed calls and avoid dynamic lambda expressions per Plan §Migration Steps item 3
@@ -45,3 +45,5 @@ This document tracks fixes to the LegacyModernizer.Generation code generator to 
 - [ ] (7) Count CS0618 and CS8603 warnings in build output and verify reduction compared to baseline per Plan §Success Criteria (**Verify**)
 
 ---
+
+

@@ -557,14 +557,17 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
 
         var content = File.ReadAllText(parentBuilderFile);
 
-        if (HasIndexerForParameter(content, parameterName))
-            return $"[{parameterName}]";
-
+        // Prefer ByXxx methods over indexers (to avoid obsolete string indexers)
         var byMethod = FindByMethodForParameter(content, originalParameterName, parameterName);
 
         if (!string.IsNullOrWhiteSpace(byMethod))
             return $".{byMethod}({parameterName})";
 
+        // Fall back to indexer only if no ByXxx method found
+        if (HasIndexerForParameter(content, parameterName))
+            return $"[{parameterName}]";
+
+        // Default: assume indexer syntax
         return $"[{parameterName}]";
     }
 
