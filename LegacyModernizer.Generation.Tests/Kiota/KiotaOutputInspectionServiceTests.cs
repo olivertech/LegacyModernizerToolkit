@@ -1,0 +1,372 @@
+using LegacyModernizer.Application.DTOs.Commons;
+using LegacyModernizer.Application.DTOs.Common;
+using LegacyModernizer.Domain.Entities;
+using LegacyModernizer.Domain.Enums;
+using LegacyModernizer.Domain.ValueObjects;
+using LegacyModernizer.Generation.Kiota;
+
+namespace LegacyModernizer.Generation.Tests.Kiota;
+
+public sealed class KiotaOutputInspectionServiceTests : IDisposable
+{
+    private readonly string _clientRootPath;
+
+    public KiotaOutputInspectionServiceTests()
+    {
+        _clientRootPath = Path.Combine(Path.GetTempPath(), "LegacyModernizerTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_clientRootPath);
+    }
+
+    [Fact]
+    public async Task InspectAsync_UsesTheCorrectItemRequestBuilderForGetAndDeleteOperations()
+    {
+        WriteFile(
+            "ApiClient.cs",
+            """
+            namespace Fake.Client;
+
+            public partial class FakeApiClient
+            {
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Calendar", "CalendarRequestBuilder.cs"),
+            """
+            namespace Fake.Client.Calendar;
+
+            public class CalendarRequestBuilder
+            {
+                [global::System.Obsolete("deprecated")]
+                public global::Fake.Client.Calendar.Item.ItemRequestBuilder this[string position] => throw null!;
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Calendar", "Item", "ItemRequestBuilder.cs"),
+            """
+            namespace Fake.Client.Calendar.Item;
+
+            public class ItemRequestBuilder
+            {
+                public async global::System.Threading.Tasks.Task<global::Fake.Client.Models.CalendarEntryResponse?> GetAsync(global::System.Action<object>? requestConfiguration = default, global::System.Threading.CancellationToken cancellationToken = default)
+                {
+                    await global::System.Threading.Tasks.Task.CompletedTask;
+                    return default;
+                }
+
+                public async global::System.Threading.Tasks.Task DeleteAsync(global::System.Action<object>? requestConfiguration = default, global::System.Threading.CancellationToken cancellationToken = default)
+                {
+                    await global::System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Profiles", "ProfilesRequestBuilder.cs"),
+            """
+            namespace Fake.Client.Profiles;
+
+            public class ProfilesRequestBuilder
+            {
+                public global::Fake.Client.Profiles.Item.ItemRequestBuilder this[string position] => throw null!;
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Profiles", "Item", "ItemRequestBuilder.cs"),
+            """
+            namespace Fake.Client.Profiles.Item;
+
+            public class ItemRequestBuilder
+            {
+                public async global::System.Threading.Tasks.Task<global::Fake.Client.Models.ProfileResponse?> GetAsync(global::System.Action<object>? requestConfiguration = default, global::System.Threading.CancellationToken cancellationToken = default)
+                {
+                    await global::System.Threading.Tasks.Task.CompletedTask;
+                    return default;
+                }
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Models", "CalendarEntryResponse.cs"),
+            """
+            namespace Fake.Client.Models;
+
+            public class CalendarEntryResponse
+            {
+                public string? Id { get; set; }
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Models", "ProfileResponse.cs"),
+            """
+            namespace Fake.Client.Models;
+
+            public class ProfileResponse
+            {
+                public string? Id { get; set; }
+            }
+            """);
+
+        var artifact = new GeneratedArtifact(
+            ArtifactType.GeneratedClient,
+            new ArtifactLocation(_clientRootPath),
+            ExecutionStep.ClientGeneration);
+
+        var apiGroups = new[]
+        {
+            new ApiGroupDefinition
+            {
+                Name = "Calendar",
+                Endpoints =
+                [
+                    new ApiEndpointDefinition
+                    {
+                        Path = "/v1/calendar/{id}",
+                        Method = "GET",
+                        Parameters =
+                        [
+                            new ApiParameterDefinition { Name = "id", Location = "path", Required = true }
+                        ]
+                    },
+                    new ApiEndpointDefinition
+                    {
+                        Path = "/v1/calendar/{id}",
+                        Method = "DELETE",
+                        Parameters =
+                        [
+                            new ApiParameterDefinition { Name = "id", Location = "path", Required = true }
+                        ]
+                    }
+                ]
+            }
+        };
+
+        var service = new KiotaOutputInspectionService();
+
+        var metadata = await service.InspectAsync(artifact, apiGroups);
+        var calendarGroup = Assert.Single(metadata.Groups, x => x.GroupName == "Calendar");
+
+        var getOperation = Assert.Single(calendarGroup.Operations, x => x.HttpMethod == "GET");
+        Assert.Equal("Fake.Client.Models.CalendarEntryResponse?", getOperation.ReturnTypeName);
+        Assert.Equal("calendar/{param}", getOperation.EndpointPath);
+        var getPathParameter = Assert.Single(getOperation.PathParameters);
+        Assert.Equal("id", getPathParameter.Name, ignoreCase: true);
+        Assert.Equal("[id]", getPathParameter.AccessExpression);
+
+        var deleteOperation = Assert.Single(calendarGroup.Operations, x => x.HttpMethod == "DELETE");
+        Assert.Equal(string.Empty, deleteOperation.ReturnTypeName);
+        var deletePathParameter = Assert.Single(deleteOperation.PathParameters);
+        Assert.Equal("[id]", deletePathParameter.AccessExpression);
+    }
+
+    [Fact]
+    public async Task InspectAsync_ExtractsTypedIndexerParameterType_WhenStringIndexerIsObsolete()
+    {
+        WriteFile(
+            "ApiClient.cs",
+            """
+            namespace Fake.Client;
+
+            public partial class FakeApiClient
+            {
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Notifications", "NotificationsRequestBuilder.cs"),
+            """
+            namespace Fake.Client.Notifications;
+
+            public class NotificationsRequestBuilder
+            {
+                [global::System.Obsolete("deprecated")]
+                public global::Fake.Client.Notifications.Item.ItemRequestBuilder this[string position] => throw null!;
+
+                public global::Fake.Client.Notifications.Item.ItemRequestBuilder this[int? position] => throw null!;
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Notifications", "Item", "ItemRequestBuilder.cs"),
+            """
+            namespace Fake.Client.Notifications.Item;
+
+            public class ItemRequestBuilder
+            {
+                public async global::System.Threading.Tasks.Task<global::Fake.Client.Models.NotificationResponse?> GetAsync(global::System.Action<object>? requestConfiguration = default, global::System.Threading.CancellationToken cancellationToken = default)
+                {
+                    await global::System.Threading.Tasks.Task.CompletedTask;
+                    return default;
+                }
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Models", "NotificationResponse.cs"),
+            """
+            namespace Fake.Client.Models;
+
+            public class NotificationResponse
+            {
+                public string? Id { get; set; }
+            }
+            """);
+
+        var artifact = new GeneratedArtifact(
+            ArtifactType.GeneratedClient,
+            new ArtifactLocation(_clientRootPath),
+            ExecutionStep.ClientGeneration);
+
+        var apiGroups = new[]
+        {
+            new ApiGroupDefinition
+            {
+                Name = "Notifications",
+                Endpoints =
+                [
+                    new ApiEndpointDefinition
+                    {
+                        Path = "/v1/notifications/{id}",
+                        Method = "GET",
+                        Parameters =
+                        [
+                            new ApiParameterDefinition { Name = "id", Location = "path", Required = true }
+                        ]
+                    }
+                ]
+            }
+        };
+
+        var service = new KiotaOutputInspectionService();
+
+        var metadata = await service.InspectAsync(artifact, apiGroups);
+        var notificationsGroup = Assert.Single(metadata.Groups, x => x.GroupName == "Notifications");
+        Assert.Equal("int?", notificationsGroup.DefaultPathParameterTypeName);
+        Assert.Equal("[{parameterName}]", notificationsGroup.DefaultPathAccessExpressionTemplate);
+        var getOperation = Assert.Single(notificationsGroup.Operations, x => x.HttpMethod == "GET");
+        var pathParameter = Assert.Single(getOperation.PathParameters);
+
+        Assert.Equal("int?", pathParameter.TypeName);
+        Assert.Equal("[id]", pathParameter.AccessExpression);
+    }
+
+    [Fact]
+    public async Task InspectAsync_UsesTypedPathParameterObjectIndexer_WhenAvailable()
+    {
+        WriteFile(
+            "ApiClient.cs",
+            """
+            namespace Fake.Client;
+
+            public partial class FakeApiClient
+            {
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Businesses", "BusinessesRequestBuilder.cs"),
+            """
+            namespace Fake.Client.Businesses;
+
+            public class BusinessesRequestBuilder
+            {
+                [global::System.Obsolete("deprecated")]
+                public global::Fake.Client.Businesses.Item.ItemRequestBuilder this[string position] => throw null!;
+
+                public global::Fake.Client.Businesses.Item.ItemRequestBuilder this[global::Fake.Client.Businesses.BusinessesRequestBuilderPathParameters pathParameters] => throw null!;
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Businesses", "BusinessesRequestBuilderPathParameters.cs"),
+            """
+            namespace Fake.Client.Businesses;
+
+            public class BusinessesRequestBuilderPathParameters
+            {
+                public string? Id { get; set; }
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Businesses", "Item", "ItemRequestBuilder.cs"),
+            """
+            namespace Fake.Client.Businesses.Item;
+
+            public class ItemRequestBuilder
+            {
+                public async global::System.Threading.Tasks.Task<global::Fake.Client.Models.BusinessResponse?> GetAsync(global::System.Action<object>? requestConfiguration = default, global::System.Threading.CancellationToken cancellationToken = default)
+                {
+                    await global::System.Threading.Tasks.Task.CompletedTask;
+                    return default;
+                }
+            }
+            """);
+
+        WriteFile(
+            Path.Combine("Models", "BusinessResponse.cs"),
+            """
+            namespace Fake.Client.Models;
+
+            public class BusinessResponse
+            {
+                public string? Id { get; set; }
+            }
+            """);
+
+        var artifact = new GeneratedArtifact(
+            ArtifactType.GeneratedClient,
+            new ArtifactLocation(_clientRootPath),
+            ExecutionStep.ClientGeneration);
+
+        var apiGroups = new[]
+        {
+            new ApiGroupDefinition
+            {
+                Name = "Businesses",
+                Endpoints =
+                [
+                    new ApiEndpointDefinition
+                    {
+                        Path = "/v1/businesses/{id}",
+                        Method = "GET",
+                        Parameters =
+                        [
+                            new ApiParameterDefinition { Name = "id", Location = "path", Required = true }
+                        ]
+                    }
+                ]
+            }
+        };
+
+        var service = new KiotaOutputInspectionService();
+
+        var metadata = await service.InspectAsync(artifact, apiGroups);
+        var businessesGroup = Assert.Single(metadata.Groups, x => x.GroupName == "Businesses");
+        var getOperation = Assert.Single(businessesGroup.Operations, x => x.HttpMethod == "GET");
+        var pathParameter = Assert.Single(getOperation.PathParameters);
+
+        Assert.Equal("string?", pathParameter.TypeName);
+        Assert.Equal("[new Fake.Client.Businesses.BusinessesRequestBuilderPathParameters { Id = id }]", pathParameter.AccessExpression);
+    }
+
+    private void WriteFile(string relativePath, string content)
+    {
+        var fullPath = Path.Combine(_clientRootPath, relativePath);
+        var directoryPath = Path.GetDirectoryName(fullPath);
+
+        if (!string.IsNullOrWhiteSpace(directoryPath))
+            Directory.CreateDirectory(directoryPath);
+
+        File.WriteAllText(fullPath, content.Replace("\r\n", "\n").Replace("\n", Environment.NewLine));
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_clientRootPath))
+            Directory.Delete(_clientRootPath, recursive: true);
+    }
+}

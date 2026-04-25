@@ -6,6 +6,8 @@ public sealed class KiotaGroupMetadata
     public string BuilderTypeName { get; init; } = string.Empty;
     public string BuilderPropertyName { get; init; } = string.Empty;
     public string BuilderAccessExpression { get; init; } = string.Empty;
+    public string DefaultPathParameterTypeName { get; init; } = string.Empty;
+    public string DefaultPathAccessExpressionTemplate { get; init; } = string.Empty;
 
     public List<KiotaOperationMetadata> Operations { get; init; } = new();
 }

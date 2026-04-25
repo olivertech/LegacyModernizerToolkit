@@ -19,6 +19,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\LegacyModernizer.Generation\LegacyModernizer.Generation.csproj" />
+    <ProjectReference Include="..\LegacyModernizer.Application\LegacyModernizer.Application.csproj" />
+    <ProjectReference Include="..\LegacyModernizer.Domain\LegacyModernizer.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Folder Include="Kiota\" />
     <Folder Include="Composition\" />
     <Folder Include="Parsing\" />

@@ -76,7 +76,7 @@ public sealed class ApiGroupingService : IApiGroupingService
                     Path = path,
                     Method = operationProperty.Name.ToUpperInvariant(),
                     OperationId = ExtractOperationId(operation),
-                    Parameters = ExtractParameters(pathItem, operation),
+                    Parameters = ExtractParameters(root, pathItem, operation),
                     HasRequestBody = HasRequestBody(operation),
                     RequiresAuthorization = RequiresAuthorization(operation, globalSecurityRequired)
                 };
@@ -138,22 +138,22 @@ public sealed class ApiGroupingService : IApiGroupingService
         return string.Empty;
     }
 
-    private static List<ApiParameterDefinition> ExtractParameters(JsonElement pathItem, JsonElement operation)
+    private static List<ApiParameterDefinition> ExtractParameters(JsonElement root, JsonElement pathItem, JsonElement operation)
     {
         var parameters = new List<ApiParameterDefinition>();
 
-        AddParametersFromElement(pathItem, parameters);
-        AddParametersFromElement(operation, parameters);
+        AddParametersFromElement(root, pathItem, parameters);
+        AddParametersFromElement(root, operation, parameters);
 
         return parameters
             .GroupBy(x => $"{x.Location}:{x.Name}", StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.Last())
+            .Select(g => g.Aggregate(MergeParameterDefinitions))
             .OrderBy(x => x.Location)
             .ThenBy(x => x.Name)
             .ToList();
     }
 
-    private static void AddParametersFromElement(JsonElement element, List<ApiParameterDefinition> parameters)
+    private static void AddParametersFromElement(JsonElement root, JsonElement element, List<ApiParameterDefinition> parameters)
     {
         if (element.ValueKind != JsonValueKind.Object)
             return;
@@ -166,22 +166,31 @@ public sealed class ApiGroupingService : IApiGroupingService
 
         foreach (var parameter in parametersElement.EnumerateArray())
         {
-            if (parameter.ValueKind != JsonValueKind.Object)
+            var resolvedParameter = ResolveParameterReference(root, parameter);
+            if (resolvedParameter is null)
                 continue;
 
-            if (parameter.TryGetProperty("$ref", out _))
-                continue;
+            var parameterObject = resolvedParameter.Value;
 
-            var name = parameter.TryGetProperty("name", out var nameElement)
+            var name = parameterObject.TryGetProperty("name", out var nameElement)
                 ? nameElement.GetString() ?? string.Empty
                 : string.Empty;
 
-            var location = parameter.TryGetProperty("in", out var inElement)
+            var location = parameterObject.TryGetProperty("in", out var inElement)
                 ? inElement.GetString() ?? string.Empty
                 : string.Empty;
 
-            var required = parameter.TryGetProperty("required", out var requiredElement) &&
+            var required = parameterObject.TryGetProperty("required", out var requiredElement) &&
                            requiredElement.ValueKind == JsonValueKind.True;
+
+            var schemaType = string.Empty;
+            var schemaFormat = string.Empty;
+
+            if (parameterObject.TryGetProperty("schema", out var schemaElement) &&
+                schemaElement.ValueKind == JsonValueKind.Object)
+            {
+                (schemaType, schemaFormat) = ExtractSchemaTypeInfo(root, schemaElement);
+            }
 
             if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(location))
                 continue;
@@ -190,9 +199,138 @@ public sealed class ApiGroupingService : IApiGroupingService
             {
                 Name = name,
                 Location = location,
-                Required = required
+                Required = required,
+                SchemaType = schemaType,
+                SchemaFormat = schemaFormat
             });
         }
+    }
+
+    private static JsonElement? ResolveParameterReference(JsonElement root, JsonElement parameter)
+    {
+        if (parameter.ValueKind != JsonValueKind.Object)
+            return null;
+
+        if (!parameter.TryGetProperty("$ref", out var refElement) ||
+            refElement.ValueKind != JsonValueKind.String)
+        {
+            return parameter;
+        }
+
+        var reference = refElement.GetString();
+        if (string.IsNullOrWhiteSpace(reference) ||
+            !reference.StartsWith("#/", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var current = root;
+        var segments = reference[2..].Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        foreach (var rawSegment in segments)
+        {
+            var segment = rawSegment
+                .Replace("~1", "/", StringComparison.Ordinal)
+                .Replace("~0", "~", StringComparison.Ordinal);
+
+            if (current.ValueKind != JsonValueKind.Object ||
+                !current.TryGetProperty(segment, out current))
+            {
+                return null;
+            }
+        }
+
+        return current.ValueKind == JsonValueKind.Object
+            ? current
+            : null;
+    }
+
+    private static (string Type, string Format) ExtractSchemaTypeInfo(JsonElement root, JsonElement schemaElement)
+    {
+        if (schemaElement.ValueKind != JsonValueKind.Object)
+            return (string.Empty, string.Empty);
+
+        var type = schemaElement.TryGetProperty("type", out var typeElement) &&
+                   typeElement.ValueKind == JsonValueKind.String
+            ? typeElement.GetString() ?? string.Empty
+            : string.Empty;
+
+        var format = schemaElement.TryGetProperty("format", out var formatElement) &&
+                     formatElement.ValueKind == JsonValueKind.String
+            ? formatElement.GetString() ?? string.Empty
+            : string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(type))
+            return (type, format);
+
+        if (schemaElement.TryGetProperty("$ref", out var refElement) &&
+            refElement.ValueKind == JsonValueKind.String)
+        {
+            var resolvedSchema = ResolveJsonReference(root, refElement.GetString());
+
+            if (resolvedSchema is not null)
+                return ExtractSchemaTypeInfo(root, resolvedSchema.Value);
+        }
+
+        foreach (var compositionKeyword in new[] { "allOf", "oneOf", "anyOf" })
+        {
+            if (!schemaElement.TryGetProperty(compositionKeyword, out var compositionElement) ||
+                compositionElement.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var candidate in compositionElement.EnumerateArray())
+            {
+                var candidateTypeInfo = ExtractSchemaTypeInfo(root, candidate);
+
+                if (!string.IsNullOrWhiteSpace(candidateTypeInfo.Type))
+                    return candidateTypeInfo;
+            }
+        }
+
+        return (string.Empty, string.Empty);
+    }
+
+    private static JsonElement? ResolveJsonReference(JsonElement root, string? reference)
+    {
+        if (string.IsNullOrWhiteSpace(reference) ||
+            !reference.StartsWith("#/", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var current = root;
+        var segments = reference[2..].Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        foreach (var rawSegment in segments)
+        {
+            var segment = rawSegment
+                .Replace("~1", "/", StringComparison.Ordinal)
+                .Replace("~0", "~", StringComparison.Ordinal);
+
+            if (current.ValueKind != JsonValueKind.Object ||
+                !current.TryGetProperty(segment, out current))
+            {
+                return null;
+            }
+        }
+
+        return current;
+    }
+
+    private static ApiParameterDefinition MergeParameterDefinitions(
+        ApiParameterDefinition current,
+        ApiParameterDefinition next)
+    {
+        return new ApiParameterDefinition
+        {
+            Name = !string.IsNullOrWhiteSpace(next.Name) ? next.Name : current.Name,
+            Location = !string.IsNullOrWhiteSpace(next.Location) ? next.Location : current.Location,
+            Required = current.Required || next.Required,
+            SchemaType = !string.IsNullOrWhiteSpace(next.SchemaType) ? next.SchemaType : current.SchemaType,
+            SchemaFormat = !string.IsNullOrWhiteSpace(next.SchemaFormat) ? next.SchemaFormat : current.SchemaFormat
+        };
     }
 
     private static bool HasRequestBody(JsonElement operation)

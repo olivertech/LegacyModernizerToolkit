@@ -655,8 +655,9 @@ The generated facade follows the partial class pattern, allowing each API area t
             {
                 var returnType = ResolveReturnType(x.Group.Name, x.Endpoint, kiotaMetadata);
                 var parameters = BuildFacadeMethodParameters(x.Group.Name, x.Endpoint, kiotaMetadata);
+                var taskType = BuildTaskReturnType(returnType);
 
-                return $"    Task<{returnType}> {x.MethodName}Async({parameters});";
+                return $"    {taskType} {x.MethodName}Async({parameters});";
             });
 
         return string.Join(Environment.NewLine + Environment.NewLine, methods);
@@ -680,18 +681,20 @@ The generated facade follows the partial class pattern, allowing each API area t
             {
                 var parameters = BuildFacadeMethodParameters(group.Name, x.Endpoint, kiotaMetadata);
                 var returnType = ResolveReturnType(group.Name, x.Endpoint, kiotaMetadata);
-                var operation = ResolveKiotaOperation(group.Name, x.Endpoint, kiotaMetadata);
+                var operation = ResolveKiotaOperation(
+                    group.Name,
+                    x.Endpoint,
+                    kiotaMetadata,
+                    allowCrossMethodPathFallback: false);
                 var kiotaCallExpression = BuildKiotaCallExpression(group.Name, x.Endpoint, kiotaMetadata);
-
-                var returnStatement = BuildFacadeReturnStatement(operation);
+                var taskType = BuildTaskReturnType(returnType);
+                var methodBody = BuildFacadeMethodBody(returnType, operation, kiotaCallExpression);
 
                 return
     $$"""
-    public async Task<{{returnType}}> {{x.MethodName}}Async({{parameters}})
+    public async {{taskType}} {{x.MethodName}}Async({{parameters}})
     {
-        var result = await {{kiotaCallExpression}}.ConfigureAwait(false);
-
-        {{returnStatement}}
+{{methodBody}}
     }
 """;
             });
@@ -717,8 +720,9 @@ The generated facade follows the partial class pattern, allowing each API area t
             {
                 var returnType = ResolveReturnType(group.Name, x.Endpoint, kiotaMetadata);
                 var parameters = BuildServiceMethodParameters(group.Name, x.Endpoint, kiotaMetadata);
+                var taskType = BuildTaskReturnType(returnType);
 
-                return $"    Task<{returnType}> {x.MethodName}Async({parameters});";
+                return $"    {taskType} {x.MethodName}Async({parameters});";
             });
 
         return string.Join(Environment.NewLine + Environment.NewLine, methods);
@@ -742,13 +746,18 @@ The generated facade follows the partial class pattern, allowing each API area t
             {
                 var parameters = BuildServiceMethodParameters(group.Name, x.Endpoint, kiotaMetadata);
                 var returnType = ResolveReturnType(group.Name, x.Endpoint, kiotaMetadata);
-                var operation = ResolveKiotaOperation(group.Name, x.Endpoint, kiotaMetadata);
+                var operation = ResolveKiotaOperation(
+                    group.Name,
+                    x.Endpoint,
+                    kiotaMetadata,
+                    allowCrossMethodPathFallback: false);
                 var requestCreationBlock = BuildRequestBodyCreationBlock(operation);
                 var facadeArguments = BuildFacadeArgumentsFromService(group.Name, x.Endpoint, kiotaMetadata);
+                var taskType = BuildTaskReturnType(returnType);
 
                 return
 $$"""
-    public Task<{{returnType}}> {{x.MethodName}}Async({{parameters}})
+    public {{taskType}} {{x.MethodName}}Async({{parameters}})
     {
 {{requestCreationBlock}}        return _apiFacade.{{x.MethodName}}Async({{facadeArguments}});
     }
@@ -894,7 +903,25 @@ $$"""
 
     private static string ResolveParameterType(ApiParameterDefinition parameter, bool isQueryParameter)
     {
+        var schemaType = parameter.SchemaType?.Trim().ToLowerInvariant() ?? string.Empty;
+        var schemaFormat = parameter.SchemaFormat?.Trim().ToLowerInvariant() ?? string.Empty;
         var name = parameter.Name?.Trim().ToLowerInvariant() ?? string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(schemaType))
+        {
+            return schemaType switch
+            {
+                "integer" when schemaFormat == "int64" => "long?",
+                "integer" => "int?",
+                "number" when schemaFormat == "float" => "float?",
+                "number" when schemaFormat == "double" => "double?",
+                "number" => "decimal?",
+                "boolean" => "bool?",
+                "string" when schemaFormat is "date" or "date-time" => "DateTime?",
+                "string" => "string",
+                _ => parameter.Required && !isQueryParameter ? "string" : "string?"
+            };
+        }
 
         if (name is "page" or "pageindex" or "pagenumber" or "pagesize" or "limit" or "offset" or "take" or "skip" or "size" or "count" or "year" or "month" or "day" ||
             name.EndsWith("year", StringComparison.OrdinalIgnoreCase) ||
@@ -917,6 +944,35 @@ $$"""
         KiotaOperationMetadata? operation)
     {
         return string.Empty;
+    }
+
+    private static string BuildTaskReturnType(string returnType)
+    {
+        return string.IsNullOrWhiteSpace(returnType)
+            ? "Task"
+            : $"Task<{returnType}>";
+    }
+
+    private static string BuildFacadeMethodBody(
+        string returnType,
+        KiotaOperationMetadata? operation,
+        string kiotaCallExpression)
+    {
+        var requiresObsoleteIndexerSuppression = kiotaCallExpression.Contains('[', StringComparison.Ordinal);
+
+        if (string.IsNullOrWhiteSpace(returnType))
+        {
+            var awaitLine = $"        await {kiotaCallExpression}.ConfigureAwait(false);";
+            return WrapWithObsoleteIndexerSuppression(awaitLine, requiresObsoleteIndexerSuppression) + Environment.NewLine;
+        }
+
+        var returnStatement = BuildFacadeReturnStatement(operation);
+        var resultAssignment = $"        var result = await {kiotaCallExpression}.ConfigureAwait(false);";
+
+        resultAssignment = WrapWithObsoleteIndexerSuppression(resultAssignment, requiresObsoleteIndexerSuppression);
+
+        return
+            $"{resultAssignment}{Environment.NewLine}{Environment.NewLine}        {returnStatement}{Environment.NewLine}";
     }
 
     private static string BuildFacadeReturnStatement(KiotaOperationMetadata? operation)
@@ -946,18 +1002,33 @@ $$"""
         ApiParameterDefinition parameter,
         KiotaClientMetadata kiotaMetadata)
     {
-        var operation = ResolveKiotaOperation(groupName, endpoint, kiotaMetadata);
+        var operation = ResolveKiotaOperation(
+            groupName,
+            endpoint,
+            kiotaMetadata,
+            allowCrossMethodPathFallback: true);
+        var groupMetadata = ResolveKiotaGroupMetadata(groupName, endpoint, kiotaMetadata);
 
         if (operation is null)
-            throw new InvalidOperationException($"Unable to resolve Kiota operation for path parameter '{parameter.Name}' in {endpoint.Method} {endpoint.Path}.");
+            return ResolvePathParameterTypeFromFallback(groupMetadata, parameter);
 
         var pathParameter = operation.PathParameters.FirstOrDefault(x =>
             x.Name.Equals(parameter.Name, StringComparison.OrdinalIgnoreCase));
 
         if (pathParameter is null || string.IsNullOrWhiteSpace(pathParameter.TypeName))
-            throw new InvalidOperationException($"Unable to resolve Kiota type for path parameter '{parameter.Name}' in {endpoint.Method} {endpoint.Path}.");
+            return ResolvePathParameterTypeFromFallback(groupMetadata, parameter);
 
         return NormalizeGeneratedTypeName(pathParameter.TypeName);
+    }
+
+    private static string ResolvePathParameterTypeFromFallback(
+        KiotaGroupMetadata? groupMetadata,
+        ApiParameterDefinition parameter)
+    {
+        if (groupMetadata is not null && !string.IsNullOrWhiteSpace(groupMetadata.DefaultPathParameterTypeName))
+            return NormalizeGeneratedTypeName(groupMetadata.DefaultPathParameterTypeName);
+
+        return ResolveParameterType(parameter, isQueryParameter: false);
     }
 
     private static string BuildFacadeArgumentsFromService(
@@ -1029,7 +1100,8 @@ $$"""
         var operation = ResolveKiotaOperation(
             apiGroupName,
             endpoint,
-            kiotaMetadata);
+            kiotaMetadata,
+            allowCrossMethodPathFallback: true);
 
         var groupApiProperty = groupMetadata is null
             ? $"_apiClient.{NormalizeIdentifier(apiGroupName)}"
@@ -1081,8 +1153,11 @@ $$"""
             {
                 var parameterName = ExtractPathParameterName(segment);
                 var parameterAccess = ResolvePathParameterAccessExpression(
+                    apiGroupName,
+                    endpoint,
                     parameterName,
-                    operation);
+                    operation,
+                    kiotaMetadata);
 
                 chain += parameterAccess;
                 continue;
@@ -1153,10 +1228,22 @@ $$"""
         ApiEndpointDefinition endpoint,
         KiotaClientMetadata kiotaMetadata)
     {
-        var operation = ResolveKiotaOperation(groupName, endpoint, kiotaMetadata);
+        var operation = ResolveKiotaOperation(
+            groupName,
+            endpoint,
+            kiotaMetadata,
+            allowCrossMethodPathFallback: false);
 
-        if (operation is null || string.IsNullOrWhiteSpace(operation.ReturnTypeName))
+        if (operation is null)
+        {
+            if (endpoint.Method.Equals("DELETE", StringComparison.OrdinalIgnoreCase))
+                return string.Empty;
+
             throw new InvalidOperationException($"Unable to resolve Kiota return type for {endpoint.Method} {endpoint.Path}.");
+        }
+
+        if (string.IsNullOrWhiteSpace(operation.ReturnTypeName))
+            return string.Empty;
 
         var normalized = NormalizeGeneratedTypeName(operation.ReturnTypeName);
 
@@ -1175,7 +1262,11 @@ $$"""
         ApiEndpointDefinition endpoint,
         KiotaClientMetadata kiotaMetadata)
     {
-        var operation = ResolveKiotaOperation(groupName, endpoint, kiotaMetadata);
+        var operation = ResolveKiotaOperation(
+            groupName,
+            endpoint,
+            kiotaMetadata,
+            allowCrossMethodPathFallback: false);
 
         if (operation is null || string.IsNullOrWhiteSpace(operation.RequestBodyTypeName))
             throw new InvalidOperationException($"Unable to resolve Kiota request body type for {endpoint.Method} {endpoint.Path}.");
@@ -1186,12 +1277,24 @@ $$"""
     private static KiotaOperationMetadata? ResolveKiotaOperation(
         string apiGroupName,
         ApiEndpointDefinition endpoint,
-        KiotaClientMetadata kiotaMetadata)
+        KiotaClientMetadata kiotaMetadata,
+        bool allowCrossMethodPathFallback)
     {
         var normalizedEndpointPath = NormalizeOpenApiPath(endpoint.Path);
-        var allOperations = kiotaMetadata.Groups
-            .SelectMany(g => g.Operations)
-            .ToArray();
+        var groupMetadata = ResolveKiotaGroupMetadata(
+            apiGroupName,
+            endpoint,
+            kiotaMetadata);
+
+        var groupOperations = groupMetadata?.Operations.ToArray() ?? Array.Empty<KiotaOperationMetadata>();
+        var allOperations = kiotaMetadata.Groups.SelectMany(g => g.Operations).ToArray();
+
+        var exactGroupPathMatch = groupOperations.FirstOrDefault(x =>
+            x.HttpMethod.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase) &&
+            x.EndpointPath.Equals(normalizedEndpointPath, StringComparison.OrdinalIgnoreCase));
+
+        if (exactGroupPathMatch is not null)
+            return exactGroupPathMatch;
 
         var exactPathMatch = allOperations.FirstOrDefault(x =>
             x.HttpMethod.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase) &&
@@ -1202,6 +1305,13 @@ $$"""
 
         if (!string.IsNullOrWhiteSpace(endpoint.OperationId))
         {
+            var groupOperationIdMatch = groupOperations.FirstOrDefault(x =>
+                x.HttpMethod.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase) &&
+                x.OperationId.Equals(endpoint.OperationId, StringComparison.OrdinalIgnoreCase));
+
+            if (groupOperationIdMatch is not null)
+                return groupOperationIdMatch;
+
             var operationIdMatch = allOperations.FirstOrDefault(x =>
                 x.HttpMethod.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase) &&
                 x.OperationId.Equals(endpoint.OperationId, StringComparison.OrdinalIgnoreCase));
@@ -1210,13 +1320,11 @@ $$"""
                 return operationIdMatch;
         }
 
-        var groupMetadata = ResolveKiotaGroupMetadata(
-            apiGroupName,
-            endpoint,
-            kiotaMetadata);
-
         if (groupMetadata is null)
-            return null;
+            return allowCrossMethodPathFallback
+                ? allOperations.FirstOrDefault(x =>
+                    x.EndpointPath.Equals(normalizedEndpointPath, StringComparison.OrdinalIgnoreCase))
+                : null;
 
         var remainingSegments = ExtractSegmentsAfterGroupKeepingPathParameters(
                 endpoint.Path,
@@ -1228,13 +1336,40 @@ $$"""
         var accessExpression = string.Join(".", remainingSegments);
         var normalizedAccessExpression = NormalizeAccessExpression(accessExpression);
 
-        return groupMetadata.Operations.FirstOrDefault(x =>
+        var accessExpressionMatch = groupOperations.FirstOrDefault(x =>
             x.HttpMethod.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase) &&
             (string.IsNullOrWhiteSpace(endpoint.OperationId) ||
              x.OperationId.Equals(endpoint.OperationId, StringComparison.OrdinalIgnoreCase)) &&
             (x.AccessExpression.Equals(accessExpression, StringComparison.OrdinalIgnoreCase) ||
              NormalizeAccessExpression(x.AccessExpression)
                  .Equals(normalizedAccessExpression, StringComparison.OrdinalIgnoreCase)));
+
+        if (accessExpressionMatch is not null)
+            return accessExpressionMatch;
+
+        if (!allowCrossMethodPathFallback)
+            return null;
+
+        var groupPathShapeMatch = groupOperations.FirstOrDefault(x =>
+            x.EndpointPath.Equals(normalizedEndpointPath, StringComparison.OrdinalIgnoreCase));
+
+        if (groupPathShapeMatch is not null)
+            return groupPathShapeMatch;
+
+        return allOperations.FirstOrDefault(x =>
+            x.EndpointPath.Equals(normalizedEndpointPath, StringComparison.OrdinalIgnoreCase) ||
+            x.AccessExpression.Equals(accessExpression, StringComparison.OrdinalIgnoreCase) ||
+            NormalizeAccessExpression(x.AccessExpression)
+                .Equals(normalizedAccessExpression, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string WrapWithObsoleteIndexerSuppression(string codeLine, bool shouldSuppress)
+    {
+        if (!shouldSuppress)
+            return codeLine;
+
+        return
+            $"#pragma warning disable CS0618{Environment.NewLine}{codeLine}{Environment.NewLine}#pragma warning restore CS0618";
     }
 
     private static string NormalizeAccessExpression(string value)
@@ -1348,21 +1483,41 @@ $$"""
     }
 
     private static string ResolvePathParameterAccessExpression(
+        string apiGroupName,
+        ApiEndpointDefinition endpoint,
         string pathParameterName,
-        KiotaOperationMetadata? operation)
+        KiotaOperationMetadata? operation,
+        KiotaClientMetadata kiotaMetadata)
     {
         var parameterName = ToCamelCase(NormalizeIdentifier(pathParameterName));
+        var groupMetadata = ResolveKiotaGroupMetadata(apiGroupName, endpoint, kiotaMetadata);
 
         if (operation is null || operation.PathParameters.Count == 0)
-            throw new InvalidOperationException($"Unable to resolve Kiota path navigation for parameter '{pathParameterName}'.");
+            return ResolvePathAccessFallback(groupMetadata, parameterName);
 
         var metadata = operation.PathParameters.FirstOrDefault(x =>
             x.Name.Equals(pathParameterName, StringComparison.OrdinalIgnoreCase));
 
         if (metadata is null || string.IsNullOrWhiteSpace(metadata.AccessExpression))
-            throw new InvalidOperationException($"Unable to resolve Kiota access expression for path parameter '{pathParameterName}'.");
+            return ResolvePathAccessFallback(groupMetadata, parameterName);
 
         return metadata.AccessExpression;
+    }
+
+    private static string ResolvePathAccessFallback(
+        KiotaGroupMetadata? groupMetadata,
+        string parameterName)
+    {
+        if (groupMetadata is not null &&
+            !string.IsNullOrWhiteSpace(groupMetadata.DefaultPathAccessExpressionTemplate))
+        {
+            return groupMetadata.DefaultPathAccessExpressionTemplate.Replace(
+                "{parameterName}",
+                parameterName,
+                StringComparison.Ordinal);
+        }
+
+        return $"[{parameterName}]";
     }
 
     private static string GetKiotaAsyncMethodName(string httpMethod)
