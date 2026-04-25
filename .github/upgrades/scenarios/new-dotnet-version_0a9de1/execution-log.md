@@ -115,3 +115,29 @@ Paused - Generator builds; requires regenerated Ark solution and build log for v
 ### Outcome
 Failed - Errors remain: CS0173 (Date ternary), CS0029 (list vs single), CS0618 (indexer).
 
+
+## [2026-04-25 01:41] TASK-002: Validate generator fixes by building regenerated solution
+
+### Changes Made
+- **Modified**: `LegacyModernizer.Generation/Composition/SolutionCompositionService.cs`
+  - Collection return handling uses enumerable/ wrapper/ single fallbacks
+  - Date query parameter assignment uses nullable Date conversion
+  - Added `BuildFallbackPathAccess` to prefer `ById` accessors
+  - Added `System.Collections.Generic`/`System.Linq` to generated facade partials
+
+### Commits
+- `3530be2`: TASK-002: Fix collection returns, date params, and path access
+
+### Outcome
+Paused - Generator builds; waiting for regenerated Ark build output.
+
+
+## [2026-04-25 01:43] TASK-002: Validate generator fixes by building regenerated solution
+
+### Changes Made
+- **Verified**: Regenerated Ark solution and executed `dotnet build`
+- **Build Status**: Failed - 27 CS1001 errors (identifier expected)
+
+### Outcome
+Failed - Generated ApiFacade methods contain invalid syntax; need file snippet to diagnose.
+

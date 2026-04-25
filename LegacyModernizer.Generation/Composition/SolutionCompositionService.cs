@@ -693,7 +693,16 @@ The generated facade follows the partial class pattern, allowing each API area t
                 var operation = ResolveKiotaOperation(group.Name, x.Endpoint, kiotaMetadata);
 
                 var collectionItemType = NormalizeGeneratedTypeName(operation?.ReturnTypeName ?? "object");
-                var collectionPropertyName = operation?.CollectionPropertyName ?? "Value";
+                var collectionPropertyName = string.IsNullOrWhiteSpace(operation?.CollectionPropertyName)
+                    ? "Value"
+                    : operation!.CollectionPropertyName;
+
+                var wrapperBlock = operation?.IsCollectionWrapper == true
+                    ? $$"""
+        dynamic wrapper = result;
+        return wrapper?.{{collectionPropertyName}} ?? [];
+"""
+                    : string.Empty;
 
                 var returnStatement = operation?.IsCollection == true
                     ? $$"""
@@ -703,12 +712,7 @@ The generated facade follows the partial class pattern, allowing each API area t
         if (result is System.Collections.Generic.IEnumerable<{{collectionItemType}}> sequence)
             return sequence.ToList();
 
-        if ({{(operation?.IsCollectionWrapper == true).ToString().ToLowerInvariant()}})
-        {
-            dynamic wrapper = result;
-            return wrapper?.{{collectionPropertyName}} ?? [];
-        }
-
+{{wrapperBlock}}
         return new List<{{collectionItemType}}> { result };
 """
                     : "return result;";
