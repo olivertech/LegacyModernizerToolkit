@@ -692,7 +692,7 @@ The generated facade follows the partial class pattern, allowing each API area t
 
                 var returnStatement = operation?.IsCollection == true
                     ? (operation.IsCollectionWrapper
-                        ? "return result?.Value ?? [];"
+                        ? $"return result?.{operation.CollectionPropertyName ?? "Value"} ?? [];"
                         : "return result;")
                     : "return result;";
 
@@ -1027,7 +1027,7 @@ $$"""
         if (string.IsNullOrWhiteSpace(configBlock))
             return $"{builderChain}.{asyncMethodName}({bodyArgument}cancellationToken: cancellationToken)";
 
-        return $"{builderChain}.{asyncMethodName}({bodyArgument}config =>{Environment.NewLine}        {{{Environment.NewLine}{configBlock}{Environment.NewLine}        }}, cancellationToken: cancellationToken)";
+        return $"{builderChain}.{asyncMethodName}({bodyArgument}new System.Action<dynamic>(config =>{Environment.NewLine}        {{{Environment.NewLine}{configBlock}{Environment.NewLine}        }}), cancellationToken: cancellationToken)";
     }
 
     private static string BuildKiotaBuilderChain(
@@ -1208,6 +1208,8 @@ $$"""
 
         return groupMetadata.Operations.FirstOrDefault(x =>
             x.HttpMethod.Equals(endpoint.Method, StringComparison.OrdinalIgnoreCase) &&
+            (string.IsNullOrWhiteSpace(endpoint.OperationId) ||
+             x.OperationId.Equals(endpoint.OperationId, StringComparison.OrdinalIgnoreCase)) &&
             (x.AccessExpression.Equals(accessExpression, StringComparison.OrdinalIgnoreCase) ||
              NormalizeAccessExpression(x.AccessExpression)
                  .Equals(normalizedAccessExpression, StringComparison.OrdinalIgnoreCase)));

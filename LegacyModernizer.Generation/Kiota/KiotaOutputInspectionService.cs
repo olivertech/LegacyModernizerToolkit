@@ -16,6 +16,10 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         string ReturnType,
         string ParametersText);
 
+    private sealed record CollectionWrapperInfo(
+        string ItemType,
+        string PropertyName);
+
     public Task<KiotaClientMetadata> InspectAsync(
         GeneratedArtifact generatedClientArtifact,
         IReadOnlyCollection<ApiGroupDefinition> apiGroups,
@@ -321,6 +325,7 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         var isCollection = IsCollectionReturnType(rawReturnType);
         var isCollectionWrapper = false;
         var returnType = rawReturnType;
+        var collectionPropertyName = string.Empty;
 
         // Direct collection return (Task<List<T>> etc.)
         if (isCollection)
@@ -330,12 +335,13 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         else if (!rawReturnType.Equals("object?", StringComparison.OrdinalIgnoreCase))
         {
             // Wrapper response with Value collection property
-            var collectionItemType = ExtractCollectionItemTypeFromWrapperResponse(clientRootPath, rawReturnType);
-            if (!string.IsNullOrWhiteSpace(collectionItemType))
+            var wrapperInfo = ExtractCollectionItemTypeFromWrapperResponse(clientRootPath, rawReturnType);
+            if (wrapperInfo is not null)
             {
                 isCollection = true;
                 isCollectionWrapper = true;
-                returnType = collectionItemType;
+                returnType = wrapperInfo.ItemType;
+                collectionPropertyName = wrapperInfo.PropertyName;
             }
         }
 
@@ -368,6 +374,7 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             RequestBodyProperties = bodyProperties,
             IsCollection = isCollection,
             IsCollectionWrapper = isCollectionWrapper,
+            CollectionPropertyName = collectionPropertyName,
             PathParameters = pathParameters
         };
     }
@@ -968,7 +975,7 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             || typeName.Contains("IEnumerable<", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string? ExtractCollectionItemTypeFromWrapperResponse(
+    private static CollectionWrapperInfo? ExtractCollectionItemTypeFromWrapperResponse(
         string clientRootPath,
         string wrapperTypeName)
     {
@@ -987,13 +994,14 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         // Look for "public List<T> Value" or "public ICollection<T> Value" property
         var collectionPropertyMatch = System.Text.RegularExpressions.Regex.Match(
             content,
-            @"public\s+(List|IList|ICollection|IEnumerable)<(?<innerType>[^>]+)>\???\s+(Value|Items)\s*\{\s*get",
+            @"public\s+(List|IList|ICollection|IEnumerable)<(?<innerType>[^>]+)>\???\s+(?<propertyName>Value|Items)\s*\{\s*get",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         if (collectionPropertyMatch.Success)
         {
             var innerType = collectionPropertyMatch.Groups["innerType"].Value.Trim();
-            return CleanTypeName(innerType);
+            var propertyName = collectionPropertyMatch.Groups["propertyName"].Value.Trim();
+            return new CollectionWrapperInfo(CleanTypeName(innerType), propertyName);
         }
 
         return null;

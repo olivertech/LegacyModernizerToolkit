@@ -11,6 +11,7 @@ public sealed class KiotaOperationMetadata
     public string EndpointPath { get; init; } = string.Empty;
     public bool IsCollection { get; init; }
     public bool IsCollectionWrapper { get; init; }
+    public string? CollectionPropertyName { get; init; }
 
     public List<KiotaRequestBodyPropertyMetadata> RequestBodyProperties { get; init; } = new();
     public List<KiotaPathParameterMetadata> PathParameters { get; init; } = new();
