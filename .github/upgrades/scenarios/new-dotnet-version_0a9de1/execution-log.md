@@ -86,3 +86,32 @@ Complete - Generator builds successfully after updates.
 ### Outcome
 Failed - Errors remain: CS1061 (Value on page responses), CS0029 (single vs list), CS1977 (dynamic lambda).
 
+
+## [2026-04-25 01:35] TASK-002: Validate generator fixes by building regenerated solution
+
+### Changes Made
+- **Modified**: `LegacyModernizer.Application/DTOs/Commons/KiotaOperationMetadata.cs`
+  - Added `CollectionPropertyName` to track wrapper collection property (Value/Items)
+- **Modified**: `LegacyModernizer.Generation/Kiota/KiotaOutputInspectionService.cs`
+  - Capture collection property name (Value/Items) for wrapper responses
+- **Modified**: `LegacyModernizer.Generation/Composition/SolutionCompositionService.cs`
+  - Use wrapper-specific collection property in return statements
+  - Wrap request configuration lambda in `System.Action<dynamic>` to avoid CS1977
+  - Tighten operation mapping with OperationId filter
+
+### Commits
+- `d5baa05`: TASK-002: Refine wrapper handling and dynamic config generation
+
+### Outcome
+Paused - Generator builds; requires regenerated Ark solution and build log for validation.
+
+
+## [2026-04-25 01:37] TASK-002: Validate generator fixes by building regenerated solution
+
+### Changes Made
+- **Verified**: Regenerated Ark solution and executed `dotnet build`
+- **Build Status**: Failed - 14 errors, 35 warnings
+
+### Outcome
+Failed - Errors remain: CS0173 (Date ternary), CS0029 (list vs single), CS0618 (indexer).
+

@@ -442,6 +442,8 @@ public sealed partial class ApiFacade : IApiFacade
 
         var content =
 $$"""
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Kiota.Abstractions;
@@ -690,10 +692,25 @@ The generated facade follows the partial class pattern, allowing each API area t
                 var kiotaCallExpression = BuildKiotaCallExpression(group.Name, x.Endpoint, kiotaMetadata);
                 var operation = ResolveKiotaOperation(group.Name, x.Endpoint, kiotaMetadata);
 
+                var collectionItemType = NormalizeGeneratedTypeName(operation?.ReturnTypeName ?? "object");
+                var collectionPropertyName = operation?.CollectionPropertyName ?? "Value";
+
                 var returnStatement = operation?.IsCollection == true
-                    ? (operation.IsCollectionWrapper
-                        ? $"return result?.{operation.CollectionPropertyName ?? "Value"} ?? [];"
-                        : "return result;")
+                    ? $$"""
+        if (result is null)
+            return [];
+
+        if (result is System.Collections.Generic.IEnumerable<{{collectionItemType}}> sequence)
+            return sequence.ToList();
+
+        if ({{(operation?.IsCollectionWrapper == true).ToString().ToLowerInvariant()}})
+        {
+            dynamic wrapper = result;
+            return wrapper?.{{collectionPropertyName}} ?? [];
+        }
+
+        return new List<{{collectionItemType}}> { result };
+"""
                     : "return result;";
 
                 return
@@ -702,7 +719,7 @@ $$"""
     {
         var result = await {{kiotaCallExpression}}.ConfigureAwait(false);
 
-        {{returnStatement}}
+{{returnStatement}}
     }
 """;
             });
@@ -1109,7 +1126,7 @@ $$"""
         string originalParameterName)
     {
         if (originalParameterName.Contains("date", StringComparison.OrdinalIgnoreCase))
-            return $"{parameterName} == null ? null : new Microsoft.Kiota.Abstractions.Date({parameterName}.Value)";
+            return $"{parameterName}.HasValue ? new Microsoft.Kiota.Abstractions.Date({parameterName}.Value) : (Microsoft.Kiota.Abstractions.Date?)null";
 
         return parameterName;
     }
@@ -1332,15 +1349,25 @@ $$"""
         var parameterName = ToCamelCase(NormalizeIdentifier(pathParameterName));
 
         if (operation is null || operation.PathParameters.Count == 0)
-            return $"[{parameterName}]";
+            return BuildFallbackPathAccess(pathParameterName, parameterName);
 
         var metadata = operation.PathParameters.FirstOrDefault(x =>
             x.Name.Equals(pathParameterName, StringComparison.OrdinalIgnoreCase));
 
         if (metadata is null || string.IsNullOrWhiteSpace(metadata.AccessExpression))
-            return $"[{parameterName}]";
+            return BuildFallbackPathAccess(pathParameterName, parameterName);
 
         return metadata.AccessExpression;
+    }
+
+    private static string BuildFallbackPathAccess(string pathParameterName, string parameterName)
+    {
+        var normalizedParameter = NormalizeIdentifier(pathParameterName);
+
+        if (normalizedParameter.EndsWith("Id", StringComparison.OrdinalIgnoreCase))
+            return $".By{normalizedParameter}({parameterName})";
+
+        return $"[{parameterName}]";
     }
 
     private static string GetKiotaAsyncMethodName(string httpMethod)
