@@ -2,6 +2,38 @@
 
 public sealed class SolutionCompositionService : ISolutionCompositionService
 {
+    private static readonly System.Text.RegularExpressions.Regex DtoPropertyRegex =
+        new(
+            @"public\s+(?<type>(?:global::)?[A-Za-z0-9_.<>,\s\?\[\]]+)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*\{\s*get;\s*set;\s*\}",
+            System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.Singleline);
+
+    private static readonly System.Text.RegularExpressions.Regex EnumRegex =
+        new(
+            @"public\s+enum\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*\{(?<body>[\s\S]*?)\}",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static readonly System.Text.RegularExpressions.Regex EnumMemberLineRegex =
+        new(
+            @"^\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*[^,]+)?\s*,?\s*$",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static readonly string[] CollectionTypeNames =
+    [
+        "List",
+        "IList",
+        "ICollection",
+        "IEnumerable"
+    ];
+
+    private sealed class DtoGenerationContext
+    {
+        public required string BaseNamespace { get; init; }
+        public required string ClientRootPath { get; init; }
+        public Dictionary<string, string> SourceToDtoTypeName { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, string> DtoFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> ValueTypeDtos { get; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
     public Task<ModernizedSolution> ComposeAsync(
         ModernizationRequest request,
         Workspace workspace,
@@ -48,6 +80,12 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
             .OrderBy(x => x.Name)
             .ToArray();
 
+        var dtoContext = BuildDtoGenerationContext(
+            generatedClientPath,
+            baseNamespace,
+            normalizedGroups,
+            kiotaMetadata);
+
         var solutionRootPath = Path.Combine(workspace.Paths.ComposedPath, projectName);
         var srcPath = Path.Combine(solutionRootPath, "src");
 
@@ -56,8 +94,10 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         var infrastructureProjectPath = Path.Combine(srcPath, $"{projectName}.Infrastructure");
 
         var coreInterfacesPath = Path.Combine(coreProjectPath, "Interfaces");
+        var coreDtosPath = Path.Combine(coreProjectPath, "Dtos");
 
         var infrastructureFacadesPath = Path.Combine(infrastructureProjectPath, "Facades");
+        var infrastructureMappersPath = Path.Combine(infrastructureProjectPath, "Mappers");
         var infrastructureServicesPath = Path.Combine(infrastructureProjectPath, "Services");
         var infrastructureDependencyInjectionPath = Path.Combine(infrastructureProjectPath, "DependencyInjection");
 
@@ -67,9 +107,11 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         Directory.CreateDirectory(apiClientProjectPath);
         Directory.CreateDirectory(coreProjectPath);
         Directory.CreateDirectory(coreInterfacesPath);
+        Directory.CreateDirectory(coreDtosPath);
 
         Directory.CreateDirectory(infrastructureProjectPath);
         Directory.CreateDirectory(infrastructureFacadesPath);
+        Directory.CreateDirectory(infrastructureMappersPath);
         Directory.CreateDirectory(infrastructureServicesPath);
         Directory.CreateDirectory(infrastructureDependencyInjectionPath);
 
@@ -84,6 +126,10 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
             coreProjectPath,
             infrastructureProjectPath);
 
+        CreateDtoFiles(
+            coreDtosPath,
+            dtoContext);
+
         CreateSolutionFileWithDotNetCli(
             solutionRootPath,
             projectName,
@@ -95,7 +141,8 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
             coreInterfacesPath,
             baseNamespace,
             normalizedGroups,
-            kiotaMetadata);
+            kiotaMetadata,
+            dtoContext);
 
         CreateApiFacadeBaseFile(
             infrastructureFacadesPath,
@@ -109,20 +156,27 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
                 infrastructureFacadesPath,
                 baseNamespace,
                 group,
-                kiotaMetadata);
+                kiotaMetadata,
+                dtoContext);
 
             CreateServiceInterfaceFile(
                 coreInterfacesPath,
                 baseNamespace,
                 group,
-                kiotaMetadata);
+                kiotaMetadata,
+                dtoContext);
 
             CreateServiceImplementationFile(
                 infrastructureServicesPath,
                 baseNamespace,
                 group,
-                kiotaMetadata);
+                kiotaMetadata,
+                dtoContext);
         }
+
+        CreateDtoMapperFile(
+            infrastructureMappersPath,
+            baseNamespace);
 
         CreateServiceCollectionExtensionsFile(
             infrastructureDependencyInjectionPath,
@@ -353,19 +407,394 @@ $$"""
         }
     }
 
-    private static void CreateApiFacadeInterfaceFile(
-        string coreInterfacesPath,
+    private static DtoGenerationContext BuildDtoGenerationContext(
+        string clientRootPath,
         string baseNamespace,
         IReadOnlyCollection<ApiGroupDefinition> groups,
         KiotaClientMetadata kiotaMetadata)
     {
+        var context = new DtoGenerationContext
+        {
+            BaseNamespace = baseNamespace,
+            ClientRootPath = clientRootPath
+        };
+
+        foreach (var group in groups)
+        {
+            foreach (var endpoint in group.Endpoints)
+            {
+                var operation = ResolveKiotaOperation(
+                    group.Name,
+                    endpoint,
+                    kiotaMetadata,
+                    allowCrossMethodPathFallback: false);
+
+                if (operation is null)
+                    continue;
+
+                if (!string.IsNullOrWhiteSpace(operation.ReturnTypeName))
+                    EnsureDtoTypeRegistered(context, operation.ReturnTypeName);
+
+                if (!string.IsNullOrWhiteSpace(operation.RequestBodyTypeName))
+                    EnsureDtoTypeRegistered(context, operation.RequestBodyTypeName);
+            }
+        }
+
+        return context;
+    }
+
+    private static void CreateDtoFiles(
+        string coreDtosPath,
+        DtoGenerationContext dtoContext)
+    {
+        foreach (var dtoFile in dtoContext.DtoFiles.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            File.WriteAllText(
+                Path.Combine(coreDtosPath, dtoFile.Key),
+                dtoFile.Value);
+        }
+    }
+
+    private static void CreateDtoMapperFile(
+        string infrastructureMappersPath,
+        string baseNamespace)
+    {
+        var filePath = Path.Combine(infrastructureMappersPath, "GeneratedDtoMapper.cs");
+
+        var content =
+$$"""
+using System.Collections;
+using System.Collections.Generic;
+using System.Text.Json;
+
+namespace {{baseNamespace}}.Infrastructure.Mappers;
+
+internal static class GeneratedDtoMapper
+{
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    public static TTarget? Map<TTarget>(object? source)
+    {
+        if (source is null)
+            return default;
+
+        if (source is TTarget typedTarget)
+            return typedTarget;
+
+        var json = JsonSerializer.Serialize(source, Options);
+        return JsonSerializer.Deserialize<TTarget>(json, Options);
+    }
+
+    public static TTarget MapRequired<TTarget>(object source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (source is TTarget typedTarget)
+            return typedTarget;
+
+        var json = JsonSerializer.Serialize(source, Options);
+        return JsonSerializer.Deserialize<TTarget>(json, Options)
+               ?? throw new InvalidOperationException($"Unable to map source to {typeof(TTarget).FullName}.");
+    }
+
+    public static List<TTarget>? MapList<TTarget>(IEnumerable? source)
+    {
+        if (source is null)
+            return null;
+
+        var items = new List<TTarget>();
+
+        foreach (var item in source)
+        {
+            var mapped = Map<TTarget>(item);
+
+            if (mapped is null)
+                continue;
+
+            items.Add(mapped);
+        }
+
+        return items;
+    }
+}
+""";
+
+        File.WriteAllText(filePath, content);
+    }
+
+    private static void EnsureDtoTypeRegistered(
+        DtoGenerationContext context,
+        string typeName)
+    {
+        var cleanedTypeName = CleanSourceTypeName(typeName);
+
+        if (string.IsNullOrWhiteSpace(cleanedTypeName))
+            return;
+
+        if (IsPrimitiveOrFrameworkType(cleanedTypeName))
+            return;
+
+        if (TryGetGenericTypeDefinition(cleanedTypeName, out _, out var genericArguments))
+        {
+            foreach (var genericArgument in genericArguments)
+                EnsureDtoTypeRegistered(context, genericArgument);
+
+            return;
+        }
+
+        var sourceTypeKey = TrimNullableSuffix(cleanedTypeName);
+
+        if (context.SourceToDtoTypeName.ContainsKey(sourceTypeKey))
+            return;
+
+        var dtoTypeName = $"{ExtractClassName(sourceTypeKey)}Dto";
+        context.SourceToDtoTypeName[sourceTypeKey] = dtoTypeName;
+
+        var sourceTypeFile = FindSourceTypeFile(context.ClientRootPath, sourceTypeKey);
+
+        if (string.IsNullOrWhiteSpace(sourceTypeFile) || !File.Exists(sourceTypeFile))
+        {
+            context.DtoFiles[$"{dtoTypeName}.cs"] =
+$$"""
+namespace {{context.BaseNamespace}}.Core.Dtos;
+
+public sealed class {{dtoTypeName}}
+{
+}
+""";
+            return;
+        }
+
+        var sourceContent = File.ReadAllText(sourceTypeFile);
+
+        if (TryBuildEnumDtoFileContent(context, sourceTypeKey, dtoTypeName, sourceContent, out var enumContent))
+        {
+            context.ValueTypeDtos.Add(dtoTypeName);
+            context.DtoFiles[$"{dtoTypeName}.cs"] = enumContent;
+            return;
+        }
+
+        context.DtoFiles[$"{dtoTypeName}.cs"] = BuildClassDtoFileContent(
+            context,
+            sourceTypeKey,
+            dtoTypeName,
+            sourceContent);
+    }
+
+    private static bool TryBuildEnumDtoFileContent(
+        DtoGenerationContext context,
+        string sourceTypeName,
+        string dtoTypeName,
+        string sourceContent,
+        out string content)
+    {
+        var match = EnumRegex.Match(sourceContent);
+
+        if (!match.Success)
+        {
+            content = string.Empty;
+            return false;
+        }
+
+        var enumBody = match.Groups["body"].Value;
+        var enumMembers = ExtractEnumMembers(enumBody);
+
+        if (enumMembers.Length == 0)
+        {
+            content = string.Empty;
+            return false;
+        }
+
+        var members = string.Join(
+            Environment.NewLine,
+            enumMembers.Select(x => $"    {x},"));
+
+        content =
+$$"""
+namespace {{context.BaseNamespace}}.Core.Dtos;
+
+public enum {{dtoTypeName}}
+{
+{{members}}
+}
+""";
+
+        return true;
+    }
+
+    private static string[] ExtractEnumMembers(string enumBody)
+    {
+        if (string.IsNullOrWhiteSpace(enumBody))
+            return Array.Empty<string>();
+
+        var result = new List<string>();
+        var lines = enumBody.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.Trim();
+
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            if (line.StartsWith("[", StringComparison.Ordinal))
+                continue;
+
+            if (line.StartsWith("//", StringComparison.Ordinal))
+                continue;
+
+            var match = EnumMemberLineRegex.Match(line);
+
+            if (!match.Success)
+                continue;
+
+            var memberName = match.Groups["name"].Value.Trim();
+
+            if (string.IsNullOrWhiteSpace(memberName))
+                continue;
+
+            result.Add(memberName);
+        }
+
+        return result
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string BuildClassDtoFileContent(
+        DtoGenerationContext context,
+        string sourceTypeName,
+        string dtoTypeName,
+        string sourceContent)
+    {
+        var propertyDefinitions = DtoPropertyRegex.Matches(sourceContent)
+            .Cast<System.Text.RegularExpressions.Match>()
+            .Where(match => match.Success)
+            .Select(match => new
+            {
+                TypeName = CleanSourceTypeName(match.Groups["type"].Value),
+                PropertyName = match.Groups["name"].Value.Trim()
+            })
+            .Where(x => !string.IsNullOrWhiteSpace(x.PropertyName))
+            .Where(x => !IsIgnoredRequestBodyProperty(x.PropertyName))
+            .GroupBy(x => x.PropertyName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .OrderBy(x => x.PropertyName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var lines = new List<string>();
+
+        foreach (var property in propertyDefinitions)
+        {
+            var propertyType = MapKiotaTypeToContractType(property.TypeName, context);
+            lines.Add($"    public {propertyType} {property.PropertyName} {{ get; set; }}");
+        }
+
+        var propertiesBlock = lines.Count == 0
+            ? string.Empty
+            : string.Join(Environment.NewLine, lines);
+
+        return
+$$"""
+namespace {{context.BaseNamespace}}.Core.Dtos;
+
+public sealed class {{dtoTypeName}}
+{
+{{propertiesBlock}}
+}
+""";
+    }
+
+    private static string MapKiotaTypeToContractType(
+        string typeName,
+        DtoGenerationContext context)
+    {
+        var cleanedTypeName = CleanSourceTypeName(typeName);
+
+        if (string.IsNullOrWhiteSpace(cleanedTypeName))
+            return string.Empty;
+
+        if (TryGetGenericTypeDefinition(cleanedTypeName, out var genericTypeName, out var genericArguments))
+        {
+            var mappedArguments = genericArguments
+                .Select(argument => MapKiotaTypeToContractType(argument, context))
+                .ToArray();
+
+            var genericTypeClassName = ExtractClassName(genericTypeName);
+            var nullableSuffix = HasNullableSuffix(cleanedTypeName) ? "?" : string.Empty;
+
+            if (CollectionTypeNames.Contains(genericTypeClassName, StringComparer.OrdinalIgnoreCase))
+                return $"List<{mappedArguments[0]}>".TrimEnd('?') + nullableSuffix;
+
+            return $"{genericTypeClassName}<{string.Join(", ", mappedArguments)}>{nullableSuffix}";
+        }
+
+        if (IsPrimitiveOrFrameworkType(cleanedTypeName))
+            return NormalizeGeneratedTypeName(cleanedTypeName);
+
+        var sourceTypeKey = TrimNullableSuffix(cleanedTypeName);
+        EnsureDtoTypeRegistered(context, sourceTypeKey);
+
+        if (!context.SourceToDtoTypeName.TryGetValue(sourceTypeKey, out var dtoTypeName))
+            return NormalizeGeneratedTypeName(cleanedTypeName);
+
+        if (HasNullableSuffix(cleanedTypeName) && !context.ValueTypeDtos.Contains(dtoTypeName))
+            return $"{dtoTypeName}?";
+
+        return dtoTypeName;
+    }
+
+    private static string? FindSourceTypeFile(
+        string clientRootPath,
+        string sourceTypeName)
+    {
+        var className = ExtractClassName(sourceTypeName);
+
+        if (string.IsNullOrWhiteSpace(className))
+            return null;
+
+        var matches = Directory.GetFiles(
+            clientRootPath,
+            $"{className}.cs",
+            SearchOption.AllDirectories);
+
+        if (matches.Length == 0)
+            return null;
+
+        var namespaceName = ExtractNamespace(sourceTypeName);
+
+        if (string.IsNullOrWhiteSpace(namespaceName))
+            return matches[0];
+
+        foreach (var match in matches)
+        {
+            var content = File.ReadAllText(match);
+
+            if (content.Contains($"namespace {namespaceName};", StringComparison.Ordinal))
+                return match;
+        }
+
+        return matches[0];
+    }
+
+    private static void CreateApiFacadeInterfaceFile(
+        string coreInterfacesPath,
+        string baseNamespace,
+        IReadOnlyCollection<ApiGroupDefinition> groups,
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
+    {
         var filePath = Path.Combine(coreInterfacesPath, "IApiFacade.cs");
-        var methodDefinitions = BuildFacadeInterfaceMethods(groups, kiotaMetadata);
+        var methodDefinitions = BuildFacadeInterfaceMethods(groups, kiotaMetadata, dtoContext);
 
         var content =
 $$"""
 using System.Threading;
 using System.Threading.Tasks;
+using {{baseNamespace}}.Core.Dtos;
 
 namespace {{baseNamespace}}.Core.Interfaces;
 
@@ -425,11 +854,12 @@ public sealed partial class ApiFacade : IApiFacade
         string infrastructureFacadesPath,
         string baseNamespace,
         ApiGroupDefinition group,
-        KiotaClientMetadata kiotaMetadata)
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
     {
         var groupName = group.Name.Trim();
         var filePath = Path.Combine(infrastructureFacadesPath, $"ApiFacade.{groupName}.cs");
-        var methods = BuildFacadePartialMethods(group, kiotaMetadata);
+        var methods = BuildFacadePartialMethods(group, kiotaMetadata, dtoContext);
 
         var content =
 $$"""
@@ -438,6 +868,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Kiota.Abstractions;
+using {{baseNamespace}}.Core.Dtos;
+using {{baseNamespace}}.Infrastructure.Mappers;
 
 namespace {{baseNamespace}}.Infrastructure.Facades;
 
@@ -454,16 +886,18 @@ public sealed partial class ApiFacade
         string coreInterfacesPath,
         string baseNamespace,
         ApiGroupDefinition group,
-        KiotaClientMetadata kiotaMetadata)
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
     {
         var groupName = group.Name.Trim();
         var filePath = Path.Combine(coreInterfacesPath, $"I{groupName}Service.cs");
-        var methods = BuildServiceInterfaceMethods(group, kiotaMetadata);
+        var methods = BuildServiceInterfaceMethods(group, kiotaMetadata, dtoContext);
 
         var content =
 $$"""
 using System.Threading;
 using System.Threading.Tasks;
+using {{baseNamespace}}.Core.Dtos;
 
 namespace {{baseNamespace}}.Core.Interfaces;
 
@@ -480,11 +914,12 @@ public interface I{{groupName}}Service
         string infrastructureServicesPath,
         string baseNamespace,
         ApiGroupDefinition group,
-        KiotaClientMetadata kiotaMetadata)
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
     {
         var groupName = group.Name.Trim();
         var filePath = Path.Combine(infrastructureServicesPath, $"{groupName}Service.cs");
-        var methods = BuildServiceImplementationMethods(group, kiotaMetadata);
+        var methods = BuildServiceImplementationMethods(group, kiotaMetadata, dtoContext);
 
         var content =
 $$"""
@@ -492,6 +927,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Kiota.Abstractions;
+using {{baseNamespace}}.Core.Dtos;
 using {{baseNamespace}}.Core.Interfaces;
 
 namespace {{baseNamespace}}.Infrastructure.Services;
@@ -638,7 +1074,8 @@ The generated facade follows the partial class pattern, allowing each API area t
 
     private static string BuildFacadeInterfaceMethods(
         IReadOnlyCollection<ApiGroupDefinition> groups,
-        KiotaClientMetadata kiotaMetadata)
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
     {
         var methods = groups
             .SelectMany(g => g.Endpoints.Select(e => new
@@ -653,8 +1090,8 @@ The generated facade follows the partial class pattern, allowing each API area t
             .OrderBy(x => x.MethodName)
             .Select(x =>
             {
-                var returnType = ResolveReturnType(x.Group.Name, x.Endpoint, kiotaMetadata);
-                var parameters = BuildFacadeMethodParameters(x.Group.Name, x.Endpoint, kiotaMetadata);
+                var returnType = ResolveContractReturnType(x.Group.Name, x.Endpoint, kiotaMetadata, dtoContext);
+                var parameters = BuildFacadeMethodParameters(x.Group.Name, x.Endpoint, kiotaMetadata, dtoContext);
                 var taskType = BuildTaskReturnType(returnType);
 
                 return $"    {taskType} {x.MethodName}Async({parameters});";
@@ -665,7 +1102,8 @@ The generated facade follows the partial class pattern, allowing each API area t
 
     private static string BuildFacadePartialMethods(
     ApiGroupDefinition group,
-    KiotaClientMetadata kiotaMetadata)
+    KiotaClientMetadata kiotaMetadata,
+    DtoGenerationContext dtoContext)
     {
         var methods = group.Endpoints
             .Select(e => new
@@ -679,16 +1117,23 @@ The generated facade follows the partial class pattern, allowing each API area t
             .OrderBy(x => x.MethodName)
             .Select(x =>
             {
-                var parameters = BuildFacadeMethodParameters(group.Name, x.Endpoint, kiotaMetadata);
-                var returnType = ResolveReturnType(group.Name, x.Endpoint, kiotaMetadata);
+                var parameters = BuildFacadeMethodParameters(group.Name, x.Endpoint, kiotaMetadata, dtoContext);
+                var returnType = ResolveContractReturnType(group.Name, x.Endpoint, kiotaMetadata, dtoContext);
+                var kiotaRequestBodyType = x.Endpoint.HasRequestBody
+                    ? ResolveRequestBodyType(group.Name, x.Endpoint, kiotaMetadata)
+                    : string.Empty;
                 var operation = ResolveKiotaOperation(
                     group.Name,
                     x.Endpoint,
                     kiotaMetadata,
                     allowCrossMethodPathFallback: false);
-                var kiotaCallExpression = BuildKiotaCallExpression(group.Name, x.Endpoint, kiotaMetadata);
+                var kiotaCallExpression = BuildKiotaCallExpression(
+                    group.Name,
+                    x.Endpoint,
+                    kiotaMetadata,
+                    string.IsNullOrWhiteSpace(kiotaRequestBodyType) ? "request" : "kiotaRequest");
                 var taskType = BuildTaskReturnType(returnType);
-                var methodBody = BuildFacadeMethodBody(returnType, operation, kiotaCallExpression);
+                var methodBody = BuildFacadeMethodBody(returnType, operation, kiotaCallExpression, kiotaRequestBodyType);
 
                 return
     $$"""
@@ -704,7 +1149,8 @@ The generated facade follows the partial class pattern, allowing each API area t
 
     private static string BuildServiceInterfaceMethods(
         ApiGroupDefinition group,
-        KiotaClientMetadata kiotaMetadata)
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
     {
         var methods = group.Endpoints
             .Select(e => new
@@ -718,8 +1164,8 @@ The generated facade follows the partial class pattern, allowing each API area t
             .OrderBy(x => x.MethodName)
             .Select(x =>
             {
-                var returnType = ResolveReturnType(group.Name, x.Endpoint, kiotaMetadata);
-                var parameters = BuildServiceMethodParameters(group.Name, x.Endpoint, kiotaMetadata);
+                var returnType = ResolveContractReturnType(group.Name, x.Endpoint, kiotaMetadata, dtoContext);
+                var parameters = BuildServiceMethodParameters(group.Name, x.Endpoint, kiotaMetadata, dtoContext);
                 var taskType = BuildTaskReturnType(returnType);
 
                 return $"    {taskType} {x.MethodName}Async({parameters});";
@@ -730,7 +1176,8 @@ The generated facade follows the partial class pattern, allowing each API area t
 
     private static string BuildServiceImplementationMethods(
         ApiGroupDefinition group,
-        KiotaClientMetadata kiotaMetadata)
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
     {
         var methods = group.Endpoints
             .Select(e => new
@@ -744,8 +1191,8 @@ The generated facade follows the partial class pattern, allowing each API area t
             .OrderBy(x => x.MethodName)
             .Select(x =>
             {
-                var parameters = BuildServiceMethodParameters(group.Name, x.Endpoint, kiotaMetadata);
-                var returnType = ResolveReturnType(group.Name, x.Endpoint, kiotaMetadata);
+                var parameters = BuildServiceMethodParameters(group.Name, x.Endpoint, kiotaMetadata, dtoContext);
+                var returnType = ResolveContractReturnType(group.Name, x.Endpoint, kiotaMetadata, dtoContext);
                 var operation = ResolveKiotaOperation(
                     group.Name,
                     x.Endpoint,
@@ -770,7 +1217,8 @@ $$"""
     private static string BuildFacadeMethodParameters(
         string groupName,
         ApiEndpointDefinition endpoint,
-        KiotaClientMetadata kiotaMetadata)
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
     {
         var parameters = new List<string>();
 
@@ -778,7 +1226,7 @@ $$"""
 
         if (endpoint.HasRequestBody)
         {
-            var bodyType = ResolveRequestBodyType(groupName, endpoint, kiotaMetadata);
+            var bodyType = ResolveContractRequestBodyType(groupName, endpoint, kiotaMetadata, dtoContext);
             parameters.Add($"{bodyType} request");
         }
 
@@ -796,7 +1244,8 @@ $$"""
     private static string BuildServiceMethodParameters(
         string groupName,
         ApiEndpointDefinition endpoint,
-        KiotaClientMetadata kiotaMetadata)
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
     {
         var parameters = new List<string>();
 
@@ -804,7 +1253,7 @@ $$"""
 
         if (endpoint.HasRequestBody)
         {
-            var bodyType = ResolveRequestBodyType(groupName, endpoint, kiotaMetadata);
+            var bodyType = ResolveContractRequestBodyType(groupName, endpoint, kiotaMetadata, dtoContext);
             parameters.Add($"{bodyType} request");
         }
 
@@ -956,37 +1405,68 @@ $$"""
     private static string BuildFacadeMethodBody(
         string returnType,
         KiotaOperationMetadata? operation,
-        string kiotaCallExpression)
+        string kiotaCallExpression,
+        string kiotaRequestBodyType)
     {
         var requiresObsoleteIndexerSuppression = kiotaCallExpression.Contains('[', StringComparison.Ordinal);
+        var requestMappingBlock = BuildRequestMappingBlock(kiotaRequestBodyType);
 
         if (string.IsNullOrWhiteSpace(returnType))
         {
             var awaitLine = $"        await {kiotaCallExpression}.ConfigureAwait(false);";
-            return WrapWithObsoleteIndexerSuppression(awaitLine, requiresObsoleteIndexerSuppression) + Environment.NewLine;
+            return string.Concat(
+                requestMappingBlock,
+                WrapWithObsoleteIndexerSuppression(awaitLine, requiresObsoleteIndexerSuppression),
+                Environment.NewLine);
         }
 
-        var returnStatement = BuildFacadeReturnStatement(operation);
+        var returnStatement = BuildFacadeReturnStatement(operation, returnType);
         var resultAssignment = $"        var result = await {kiotaCallExpression}.ConfigureAwait(false);";
 
         resultAssignment = WrapWithObsoleteIndexerSuppression(resultAssignment, requiresObsoleteIndexerSuppression);
 
         return
-            $"{resultAssignment}{Environment.NewLine}{Environment.NewLine}        {returnStatement}{Environment.NewLine}";
+            $"{requestMappingBlock}{resultAssignment}{Environment.NewLine}{Environment.NewLine}        {returnStatement}{Environment.NewLine}";
     }
 
-    private static string BuildFacadeReturnStatement(KiotaOperationMetadata? operation)
+    private static string BuildFacadeReturnStatement(
+        KiotaOperationMetadata? operation,
+        string returnType)
     {
         if (operation is null)
-            return "return result;";
+            return BuildDtoMappingReturnStatement(returnType, "result");
 
-        if (!operation.IsCollectionWrapper)
-            return "return result;";
+        if (operation.IsCollectionWrapper)
+        {
+            if (string.IsNullOrWhiteSpace(operation.CollectionPropertyName))
+                throw new InvalidOperationException($"A collection wrapper return for '{operation.OperationId}' is missing its collection property metadata.");
 
-        if (string.IsNullOrWhiteSpace(operation.CollectionPropertyName))
-            throw new InvalidOperationException($"A collection wrapper return for '{operation.OperationId}' is missing its collection property metadata.");
+            return BuildDtoMappingReturnStatement(returnType, $"result?.{operation.CollectionPropertyName}");
+        }
 
-        return $"return result?.{operation.CollectionPropertyName}?.ToList();";
+        return BuildDtoMappingReturnStatement(returnType, "result");
+    }
+
+    private static string BuildRequestMappingBlock(string kiotaRequestBodyType)
+    {
+        if (string.IsNullOrWhiteSpace(kiotaRequestBodyType))
+            return string.Empty;
+
+        return $"        var kiotaRequest = GeneratedDtoMapper.MapRequired<{NormalizeGeneratedTypeName(kiotaRequestBodyType)}>(request);{Environment.NewLine}{Environment.NewLine}";
+    }
+
+    private static string BuildDtoMappingReturnStatement(string contractReturnType, string sourceExpression)
+    {
+        if (string.IsNullOrWhiteSpace(contractReturnType))
+            return "return;";
+
+        if (IsCollectionContractType(contractReturnType))
+        {
+            var itemType = ExtractInnerTypeFromCollection(contractReturnType);
+            return $"return GeneratedDtoMapper.MapList<{itemType}>({sourceExpression});";
+        }
+
+        return $"return GeneratedDtoMapper.Map<{contractReturnType.TrimEnd('?')}>({sourceExpression});";
     }
 
     private static bool IsIgnoredRequestBodyProperty(string propertyName)
@@ -1090,7 +1570,8 @@ $$"""
     private static string BuildKiotaCallExpression(
         string apiGroupName,
         ApiEndpointDefinition endpoint,
-        KiotaClientMetadata kiotaMetadata)
+        KiotaClientMetadata kiotaMetadata,
+        string bodyArgumentName)
     {
         var groupMetadata = ResolveKiotaGroupMetadata(
             apiGroupName,
@@ -1116,7 +1597,7 @@ $$"""
 
         var asyncMethodName = GetKiotaAsyncMethodName(endpoint.Method);
         var configBlock = BuildKiotaRequestConfiguration(endpoint);
-        var bodyArgument = endpoint.HasRequestBody ? "request, " : string.Empty;
+        var bodyArgument = endpoint.HasRequestBody ? $"{bodyArgumentName}, " : string.Empty;
 
         if (string.IsNullOrWhiteSpace(configBlock))
             return $"{builderChain}.{asyncMethodName}({bodyArgument}cancellationToken: cancellationToken)";
@@ -1221,6 +1702,30 @@ $$"""
             path.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Where(x => !IsVersionSegment(x))
                 .Select(x => IsPathParameterSegment(x) ? "{param}" : x.Trim().ToLowerInvariant()));
+    }
+
+    private static string ResolveContractReturnType(
+        string groupName,
+        ApiEndpointDefinition endpoint,
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
+    {
+        var returnType = ResolveReturnType(groupName, endpoint, kiotaMetadata);
+
+        if (string.IsNullOrWhiteSpace(returnType))
+            return string.Empty;
+
+        return MapKiotaTypeToContractType(returnType, dtoContext);
+    }
+
+    private static string ResolveContractRequestBodyType(
+        string groupName,
+        ApiEndpointDefinition endpoint,
+        KiotaClientMetadata kiotaMetadata,
+        DtoGenerationContext dtoContext)
+    {
+        var requestBodyType = ResolveRequestBodyType(groupName, endpoint, kiotaMetadata);
+        return MapKiotaTypeToContractType(requestBodyType, dtoContext);
     }
 
     private static string ResolveReturnType(
@@ -1595,6 +2100,168 @@ $$"""
             return value.ToLowerInvariant();
 
         return char.ToLowerInvariant(value[0]) + value[1..];
+    }
+
+    private static bool IsCollectionContractType(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+            return false;
+
+        return typeName.Contains("List<", StringComparison.OrdinalIgnoreCase)
+            || typeName.Contains("IList<", StringComparison.OrdinalIgnoreCase)
+            || typeName.Contains("ICollection<", StringComparison.OrdinalIgnoreCase)
+            || typeName.Contains("IEnumerable<", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ExtractInnerTypeFromCollection(string typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+            return string.Empty;
+
+        var start = typeName.IndexOf('<');
+
+        if (start < 0)
+            return typeName;
+
+        var depth = 0;
+
+        for (var i = start; i < typeName.Length; i++)
+        {
+            if (typeName[i] == '<')
+                depth++;
+
+            if (typeName[i] == '>')
+                depth--;
+
+            if (depth == 0)
+                return typeName[(start + 1)..i].Trim();
+        }
+
+        return typeName;
+    }
+
+    private static bool IsPrimitiveOrFrameworkType(string typeName)
+    {
+        var cleaned = TrimNullableSuffix(CleanSourceTypeName(typeName));
+
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return true;
+
+        if (cleaned.Equals("string", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("bool", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("byte", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("short", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("int", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("long", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("float", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("double", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("decimal", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("Guid", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("DateTime", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("Date", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("TimeSpan", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("byte[]", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("Binary", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (cleaned.StartsWith("System.", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    private static string CleanSourceTypeName(string typeName)
+    {
+        return typeName
+            .Replace("global::", string.Empty)
+            .Replace("\r", string.Empty)
+            .Replace("\n", string.Empty)
+            .Trim();
+    }
+
+    private static bool HasNullableSuffix(string typeName)
+    {
+        return CleanSourceTypeName(typeName).EndsWith("?", StringComparison.Ordinal);
+    }
+
+    private static string TrimNullableSuffix(string typeName)
+    {
+        var cleaned = CleanSourceTypeName(typeName);
+        return cleaned.EndsWith("?", StringComparison.Ordinal)
+            ? cleaned[..^1]
+            : cleaned;
+    }
+
+    private static string ExtractNamespace(string typeName)
+    {
+        var cleaned = TrimNullableSuffix(typeName);
+        var genericStart = cleaned.IndexOf('<');
+
+        if (genericStart >= 0)
+            cleaned = cleaned[..genericStart];
+
+        var lastDot = cleaned.LastIndexOf('.');
+        return lastDot > 0
+            ? cleaned[..lastDot]
+            : string.Empty;
+    }
+
+    private static bool TryGetGenericTypeDefinition(
+        string typeName,
+        out string genericTypeName,
+        out string[] genericArguments)
+    {
+        var cleaned = TrimNullableSuffix(typeName);
+        var genericStart = cleaned.IndexOf('<');
+
+        if (genericStart < 0 || !cleaned.EndsWith('>'))
+        {
+            genericTypeName = string.Empty;
+            genericArguments = Array.Empty<string>();
+            return false;
+        }
+
+        genericTypeName = cleaned[..genericStart].Trim();
+        var argumentsText = cleaned[(genericStart + 1)..^1];
+        genericArguments = SplitGenericArguments(argumentsText);
+        return genericArguments.Length > 0;
+    }
+
+    private static string[] SplitGenericArguments(string argumentsText)
+    {
+        if (string.IsNullOrWhiteSpace(argumentsText))
+            return Array.Empty<string>();
+
+        var arguments = new List<string>();
+        var current = new List<char>();
+        var depth = 0;
+
+        foreach (var character in argumentsText)
+        {
+            if (character == '<')
+                depth++;
+
+            if (character == '>')
+                depth--;
+
+            if (character == ',' && depth == 0)
+            {
+                arguments.Add(new string(current.ToArray()).Trim());
+                current.Clear();
+                continue;
+            }
+
+            current.Add(character);
+        }
+
+        if (current.Count > 0)
+            arguments.Add(new string(current.ToArray()).Trim());
+
+        return arguments
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToArray();
     }
 
     private static string NormalizeGeneratedTypeName(string typeName)
