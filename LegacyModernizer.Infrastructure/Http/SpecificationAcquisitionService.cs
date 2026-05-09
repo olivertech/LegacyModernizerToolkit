@@ -1,6 +1,9 @@
 ﻿namespace LegacyModernizer.Infrastructure.Http
 {
 
+    /// <summary>
+    /// Recupera a specification remota e a materializa no workspace para as próximas etapas do pipeline.
+    /// </summary>
     public sealed class SpecificationAcquisitionService : ISpecificationAcquisitionService
     {
         private readonly HttpClient _httpClient;
@@ -10,6 +13,9 @@
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         }
 
+        /// <summary>
+        /// Baixa a specification, infere o formato e grava uma cópia local controlada no workspace.
+        /// </summary>
         public async Task<ApiSpecification> AcquireAsync(SpecificationSource source,
                                                          Domain.Entities.Workspace workspace,
                                                          CancellationToken cancellationToken = default)
@@ -23,7 +29,8 @@
             if (!workspace.IsPrepared)
                 throw new InvalidOperationException("Workspace must be prepared before acquiring the specification.");
 
-            // Por enquanto, suportando apenas fontes do tipo URL. Suporte a arquivos locais pode ser adicionado posteriormente.
+            // O fluxo atual está otimizado para URL porque esse é o cenário principal da interface Web.
+            // Suporte a arquivo/local pode ser adicionado sem mudar a orquestração principal.
             if (source.Type != SpecificationSourceType.Url)
                 throw new NotSupportedException($"Specification source type '{source.Type}' is not supported yet.");
 
@@ -33,6 +40,8 @@
 
             response.EnsureSuccessStatusCode();
 
+            // A pipeline seguinte depende de uma cópia local física da spec, por isso o conteúdo é persistido
+            // no workspace antes de qualquer inspeção ou geração.
             // Tenta ler o conteúdo retornado como string. Se for vazio ou nulo, lança uma exceção.
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
 
@@ -56,6 +65,8 @@
 
         private static SpecificationFormat InferFormatFromSource(string sourceValue)
         {
+            // A inferência por extensão é suficiente para decidir o nome do arquivo local
+            // e orientar a etapa de validação/parsing.
             if (sourceValue.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) ||
                 sourceValue.EndsWith(".yml", StringComparison.OrdinalIgnoreCase))
             {

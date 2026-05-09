@@ -2,6 +2,9 @@
 
 namespace LegacyModernizer.Generation.Kiota;
 
+/// <summary>
+/// Inspeciona o código gerado pelo Kiota para descobrir a forma real dos builders, tipos e operações.
+/// </summary>
 public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
 {
     private static readonly Regex NamespaceRegex =
@@ -33,6 +36,9 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         string Name,
         string TypeName);
 
+    /// <summary>
+    /// Constrói os metadados que a composição usa para gerar contratos aderentes ao client do Kiota.
+    /// </summary>
     public Task<KiotaClientMetadata> InspectAsync(
         GeneratedArtifact generatedClientArtifact,
         IReadOnlyCollection<ApiGroupDefinition> apiGroups,
@@ -84,6 +90,8 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         List<KiotaGroupMetadata> detectedGroups,
         IReadOnlyCollection<ApiGroupDefinition> apiGroups)
     {
+        // Nem sempre o agrupamento vindo do OpenAPI bate exatamente com a árvore física gerada pelo Kiota.
+        // Esse cruzamento preserva o endpoint funcional usando o código gerado como fonte de verdade.
         foreach (var apiGroup in apiGroups)
         {
             var kiotaGroup = ResolveKiotaGroupForApiGroup(detectedGroups, apiGroup);
@@ -162,6 +170,8 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
 
     private static string DetectClientClassName(string[] allCsFiles)
     {
+        // Priorizamos o primeiro arquivo terminando em Client, que é o padrão mais consistente do Kiota
+        // para a classe raiz usada pelo request adapter.
         var preferredCandidate = allCsFiles
             .Select(Path.GetFileNameWithoutExtension)
             .FirstOrDefault(name =>

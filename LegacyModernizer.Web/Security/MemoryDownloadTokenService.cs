@@ -3,9 +3,13 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace LegacyModernizer.Web.Security;
 
+/// <summary>
+/// Emite tokens efêmeros para download de pacotes gerados sem expor caminhos físicos ao cliente.
+/// </summary>
 public sealed class MemoryDownloadTokenService : IDownloadTokenService
 {
     private static readonly TimeSpan TokenLifetime = TimeSpan.FromMinutes(15);
+    // O escopo permitido é limitado ao diretório temporário controlado do Toolkit.
     private static readonly string AllowedPackagesRoot = Path.GetFullPath(
         Path.Combine(Path.GetTempPath(), "LegacyModernizer"));
 
@@ -16,6 +20,9 @@ public sealed class MemoryDownloadTokenService : IDownloadTokenService
         _memoryCache = memoryCache ?? throw new ArgumentNullException(nameof(memoryCache));
     }
 
+    /// <summary>
+    /// Associa um token opaco ao pacote zip gerado e o mantém temporariamente em cache.
+    /// </summary>
     public string IssueToken(string packagePath)
     {
         var normalizedPackagePath = NormalizeAndValidatePackagePath(packagePath);
@@ -33,6 +40,9 @@ public sealed class MemoryDownloadTokenService : IDownloadTokenService
         return token;
     }
 
+    /// <summary>
+    /// Resolve um token apenas se ele ainda existir, estiver no escopo permitido e apontar para um zip válido.
+    /// </summary>
     public bool TryResolvePackagePath(string token, out string packagePath)
     {
         packagePath = string.Empty;
@@ -60,6 +70,8 @@ public sealed class MemoryDownloadTokenService : IDownloadTokenService
 
         var normalizedPath = Path.GetFullPath(packagePath);
 
+        // A validação antecipada garante que apenas pacotes produzidos dentro do workspace do Toolkit
+        // entrem no fluxo de download.
         if (!IsPathAllowed(normalizedPath))
             throw new InvalidOperationException("The package path is outside the allowed download scope.");
 
@@ -84,6 +96,8 @@ public sealed class MemoryDownloadTokenService : IDownloadTokenService
     {
         Span<byte> bytes = stackalloc byte[32];
         RandomNumberGenerator.Fill(bytes);
+
+        // A versão base64url evita caracteres problemáticos em links e query strings.
         return Convert.ToBase64String(bytes)
             .Replace('+', '-')
             .Replace('/', '_')

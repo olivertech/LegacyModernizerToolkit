@@ -1,7 +1,13 @@
 namespace LegacyModernizer.Generation.Composition;
 
+/// <summary>
+/// Resolve a convenção de nomes da solução gerada conforme o modo escolhido pelo usuário.
+/// </summary>
 internal static class ProjectNamingStrategyResolver
 {
+    /// <summary>
+    /// Decide entre a convenção Standalone e Embedded e devolve o layout completo de projetos e namespaces.
+    /// </summary>
     public static SolutionProjectLayout Resolve(ModernizationRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -32,6 +38,7 @@ internal static class ProjectNamingStrategyResolver
 
     private static SolutionProjectLayout ResolveEmbedded(ModernizationRequest request)
     {
+        // O prefixo é a peça que isola o módulo gerado dentro da solution legado.
         var prefix = request.EmbeddedProjectPrefix?.ToString()
                      ?? throw new InvalidOperationException("Embedded project prefix is required for Embedded mode.");
 
@@ -54,6 +61,8 @@ internal static class ProjectNamingStrategyResolver
         if (string.IsNullOrWhiteSpace(value))
             return string.Empty;
 
+        // O nome final da classe raiz do client precisa ser um identificador C# válido,
+        // mesmo quando nasce de uma composição de namespace no modo Embedded.
         var parts = value
             .Split(new[] { '-', '_', '.', '/', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(part => new string(part.Where(char.IsLetterOrDigit).ToArray()))

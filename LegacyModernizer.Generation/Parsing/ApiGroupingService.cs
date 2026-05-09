@@ -1,7 +1,13 @@
 ﻿namespace LegacyModernizer.Generation.Parsing;
 
+/// <summary>
+/// Traduz o bloco <c>paths</c> do OpenAPI em grupos de endpoints úteis para a composição da solução.
+/// </summary>
 public sealed class ApiGroupingService : IApiGroupingService
 {
+    /// <summary>
+    /// Extrai os grupos de API a partir de uma specification já validada.
+    /// </summary>
     public async Task<IReadOnlyCollection<ApiGroupDefinition>> GetGroupsAsync(ApiSpecification specification,
                                                                               CancellationToken cancellationToken = default)
     {
@@ -76,6 +82,8 @@ public sealed class ApiGroupingService : IApiGroupingService
                     Path = path,
                     Method = operationProperty.Name.ToUpperInvariant(),
                     OperationId = ExtractOperationId(operation),
+                    // Parâmetros podem existir no path item e também na operação.
+                    // O merge posterior preserva a versão mais completa da assinatura.
                     Parameters = ExtractParameters(root, pathItem, operation),
                     HasRequestBody = HasRequestBody(operation),
                     RequiresAuthorization = RequiresAuthorization(operation, globalSecurityRequired)
@@ -147,6 +155,7 @@ public sealed class ApiGroupingService : IApiGroupingService
 
         return parameters
             .GroupBy(x => $"{x.Location}:{x.Name}", StringComparer.OrdinalIgnoreCase)
+            // Em specs reais, o mesmo parâmetro pode aparecer repetido com níveis diferentes de detalhe.
             .Select(g => g.Aggregate(MergeParameterDefinitions))
             .OrderBy(x => x.Location)
             .ThenBy(x => x.Name)

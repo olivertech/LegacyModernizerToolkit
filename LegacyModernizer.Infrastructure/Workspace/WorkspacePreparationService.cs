@@ -1,5 +1,8 @@
 ﻿namespace LegacyModernizer.Infrastructure.Workspace;
 
+/// <summary>
+/// Cria a estrutura temporária isolada usada por uma execução completa de modernização.
+/// </summary>
 public sealed class WorkspacePreparationService : IWorkspacePreparationService
 {
     private const string RootFolderName = "LegacyModernizer";
@@ -8,14 +11,18 @@ public sealed class WorkspacePreparationService : IWorkspacePreparationService
     private const string ComposedFolderName = "composed";
     private const string PackageFolderName = "package";
 
+    /// <summary>
+    /// Prepara um workspace novo para evitar interferência entre execuções e facilitar rastreabilidade.
+    /// </summary>
     public Task<Domain.Entities.Workspace> PrepareAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var workspaceId = Guid.NewGuid().ToString("N"); // formatado sem hífens e tudo minúsculo, para evitar problemas em nomes de pastas
+        // Usamos um GUID compacto para garantir unicidade e evitar problemas com nomes de pasta.
+        var workspaceId = Guid.NewGuid().ToString("N");
 
-        // Criar uma estrutura de pastas única para cada workspace, usando o ID gerado.
-        // Usa o diretório temporário do sistema operacional como base.
+        // Cada execução recebe seu próprio diretório raiz para isolar spec, client gerado,
+        // solução composta e pacote final dentro do mesmo contexto físico.
         var rootPath = Path.Combine(Path.GetTempPath(), RootFolderName, workspaceId);
         var inputPath = Path.Combine(rootPath, InputFolderName);
         var generatedPath = Path.Combine(rootPath, GeneratedFolderName);

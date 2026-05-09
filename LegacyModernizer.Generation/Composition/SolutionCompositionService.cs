@@ -1,5 +1,8 @@
 ﻿namespace LegacyModernizer.Generation.Composition;
 
+/// <summary>
+/// Converte a saída do Kiota e os grupos de API em uma solução .NET pronta para consumo.
+/// </summary>
 public sealed class SolutionCompositionService : ISolutionCompositionService
 {
     private static readonly System.Text.RegularExpressions.Regex DtoPropertyRegex =
@@ -25,6 +28,9 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         "IEnumerable"
     ];
 
+    /// <summary>
+    /// Contexto interno usado para acompanhar quais tipos do Kiota já foram convertidos em DTOs gerados.
+    /// </summary>
     private sealed class DtoGenerationContext
     {
         public required string BaseNamespace { get; init; }
@@ -34,6 +40,9 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         public HashSet<string> ValueTypeDtos { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Compõe a solution final copiando o client Kiota, gerando contratos, camada HTTP e artefatos auxiliares.
+    /// </summary>
     public Task<ModernizedSolution> ComposeAsync(
         ModernizationRequest request,
         Workspace workspace,
@@ -75,6 +84,8 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         var normalizedGroups = groups
             .Where(x => !string.IsNullOrWhiteSpace(x.Name))
             .GroupBy(x => x.Name.Trim(), StringComparer.OrdinalIgnoreCase)
+            // Algumas specs repetem grupos com pequenas diferenças de casing ou ordem.
+            // Aqui consolidamos a visão final antes de gerar contratos e services.
             .Select(g => g.First())
             .OrderBy(x => x.Name)
             .ToArray();
@@ -1026,6 +1037,7 @@ private static void CreateServiceCollectionExtensionsFile(
             ? $"using {projectLayout.HttpAuthenticationNamespace};"
             : string.Empty;
 
+        // O modo de autenticação altera o contrato público e também a forma como o Kiota recebe o token em runtime.
         var authenticationRegistration = authenticationMode == AuthenticationMode.AccessTokenAccessor
             ? "        services.AddScoped<IAuthenticationProvider, AccessTokenAuthenticationProvider>();"
             : "        services.AddScoped<IAuthenticationProvider, AnonymousAuthenticationProvider>();";
@@ -1216,6 +1228,8 @@ internal sealed class AccessTokenAuthenticationProvider : IAuthenticationProvide
     {
         var filePath = Path.Combine(solutionRootPath, "generation-manifest.json");
 
+        // O manifesto registra como a geração resolveu tipos, projetos e contratos,
+        // servindo como resumo técnico da execução.
         var manifest = new
         {
             projectName = request.ProjectName.ToString(),
@@ -1270,6 +1284,7 @@ internal sealed class AccessTokenAuthenticationProvider : IAuthenticationProvide
     {
         var filePath = Path.Combine(solutionRootPath, "integration-manifest.json");
 
+        // No modo Embedded a aplicação hospedeira precisa de um mapa simples de como plugar o módulo gerado.
         var manifest = new
         {
             generationMode = request.GenerationMode.ToString(),
@@ -1636,6 +1651,7 @@ $$"""
         AddQueryParameters(parameters, endpoint);
         AddHeaderParameters(parameters, endpoint);
 
+        // No modo AccessTokenAccessor o token deixa de fazer parte da assinatura pública.
         if (endpoint.RequiresAuthorization && authenticationMode == AuthenticationMode.PerMethodToken)
             parameters.Add("string? accessToken = null");
 
@@ -2062,6 +2078,7 @@ $$"""
     {
         var lines = new List<string>();
 
+        // Só injetamos o Authorization manualmente quando o contrato público ainda expõe o token.
         if (endpoint.RequiresAuthorization && authenticationMode == AuthenticationMode.PerMethodToken)
         {
             lines.Add("            if (!string.IsNullOrWhiteSpace(accessToken))");
@@ -2193,6 +2210,8 @@ $$"""
         KiotaClientMetadata kiotaMetadata,
         bool allowCrossMethodPathFallback)
     {
+        // A resolução tenta preservar o vínculo mais forte possível com o Kiota real:
+        // verbo + path, depois operationId e por fim shape de navegação.
         var normalizedEndpointPath = NormalizeOpenApiPath(endpoint.Path);
         var groupMetadata = ResolveKiotaGroupMetadata(
             apiGroupName,
