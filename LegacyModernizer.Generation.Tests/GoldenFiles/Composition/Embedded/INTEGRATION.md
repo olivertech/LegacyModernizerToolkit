@@ -19,12 +19,13 @@ This package was generated in `Embedded` mode for direct incorporation into an e
 ## Main Contracts
 
 - `AlphaSquad.Lmt.Application.Contracts.Interfaces.IApiFacade`
+- `AlphaSquad.Lmt.Application.Contracts.Interfaces.IAccessTokenAccessor`
 - `IAuthenticationService` / `AuthenticationService`
 
 ## Authentication Mode
 
-This module was generated expecting an access token accessor strategy in the host application.
-The next implementation phase will wire this mode into the generated HTTP layer.
+This module was generated with access token resolution delegated to the host application.
+Register an implementation of `IAccessTokenAccessor` before calling `AddGeneratedApi(baseUrl)`.
 
 ## Naming Convention
 

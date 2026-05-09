@@ -14,11 +14,13 @@
   },
   "entrypoints": {
     "serviceCollectionExtension": "AlphaSquad.Lmt.Application.Http.DependencyInjection.ServiceCollectionExtensions",
-    "facadeInterface": "AlphaSquad.Lmt.Application.Contracts.Interfaces.IApiFacade"
+    "facadeInterface": "AlphaSquad.Lmt.Application.Contracts.Interfaces.IApiFacade",
+    "accessTokenAccessorInterface": "AlphaSquad.Lmt.Application.Contracts.Interfaces.IAccessTokenAccessor"
   },
   "consumerGuidance": {
     "suggestedReference": "AlphaSquad.Lmt.Application.Http",
     "addGeneratedApiMethod": "AddGeneratedApi",
+    "requiresAccessTokenAccessor": true,
     "apiGroupServices": [
       "IAuthenticationService"
     ]

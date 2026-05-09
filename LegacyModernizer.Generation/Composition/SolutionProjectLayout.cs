@@ -16,5 +16,6 @@ internal sealed record SolutionProjectLayout(
     public string HttpFacadesNamespace => $"{HttpNamespace}.Facades";
     public string HttpServicesNamespace => $"{HttpNamespace}.Services";
     public string HttpMappersNamespace => $"{HttpNamespace}.Mappers";
+    public string HttpAuthenticationNamespace => $"{HttpNamespace}.Authentication";
     public string HttpDependencyInjectionNamespace => $"{HttpNamespace}.DependencyInjection";
 }

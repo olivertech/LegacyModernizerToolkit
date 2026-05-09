@@ -96,6 +96,7 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         var coreDtosPath = Path.Combine(coreProjectPath, "Dtos");
 
         var infrastructureFacadesPath = Path.Combine(infrastructureProjectPath, "Facades");
+        var infrastructureAuthenticationPath = Path.Combine(infrastructureProjectPath, "Authentication");
         var infrastructureMappersPath = Path.Combine(infrastructureProjectPath, "Mappers");
         var infrastructureServicesPath = Path.Combine(infrastructureProjectPath, "Services");
         var infrastructureDependencyInjectionPath = Path.Combine(infrastructureProjectPath, "DependencyInjection");
@@ -110,6 +111,7 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
         Directory.CreateDirectory(infrastructureProjectPath);
         Directory.CreateDirectory(infrastructureFacadesPath);
+        Directory.CreateDirectory(infrastructureAuthenticationPath);
         Directory.CreateDirectory(infrastructureMappersPath);
         Directory.CreateDirectory(infrastructureServicesPath);
         Directory.CreateDirectory(infrastructureDependencyInjectionPath);
@@ -141,12 +143,23 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
             projectLayout,
             normalizedGroups,
             kiotaMetadata,
-            dtoContext);
+            dtoContext,
+            request.AuthenticationMode);
+
+        if (request.AuthenticationMode == AuthenticationMode.AccessTokenAccessor)
+            CreateAccessTokenAccessorInterfaceFile(coreInterfacesPath, projectLayout);
 
         CreateApiFacadeBaseFile(
             infrastructureFacadesPath,
             projectLayout,
             kiotaMetadata);
+
+        if (request.AuthenticationMode == AuthenticationMode.AccessTokenAccessor)
+        {
+            CreateAccessTokenAuthenticationProviderFile(
+                infrastructureAuthenticationPath,
+                projectLayout);
+        }
 
         foreach (var group in normalizedGroups)
         {
@@ -155,21 +168,24 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
                 projectLayout,
                 group,
                 kiotaMetadata,
-                dtoContext);
+                dtoContext,
+                request.AuthenticationMode);
 
             CreateServiceInterfaceFile(
                 coreInterfacesPath,
                 projectLayout,
                 group,
                 kiotaMetadata,
-                dtoContext);
+                dtoContext,
+                request.AuthenticationMode);
 
             CreateServiceImplementationFile(
                 infrastructureServicesPath,
                 projectLayout,
                 group,
                 kiotaMetadata,
-                dtoContext);
+                dtoContext,
+                request.AuthenticationMode);
         }
 
         CreateDtoMapperFile(
@@ -180,7 +196,8 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
             infrastructureDependencyInjectionPath,
             projectLayout,
             normalizedGroups,
-            kiotaMetadata);
+            kiotaMetadata,
+            request.AuthenticationMode);
 
         CreateGenerationManifestFile(
             solutionRootPath,
@@ -806,10 +823,11 @@ public sealed class {{dtoTypeName}}
         SolutionProjectLayout projectLayout,
         IReadOnlyCollection<ApiGroupDefinition> groups,
         KiotaClientMetadata kiotaMetadata,
-        DtoGenerationContext dtoContext)
+        DtoGenerationContext dtoContext,
+        AuthenticationMode authenticationMode)
     {
         var filePath = Path.Combine(coreInterfacesPath, "IApiFacade.cs");
-        var methodDefinitions = BuildFacadeInterfaceMethods(groups, kiotaMetadata, dtoContext);
+        var methodDefinitions = BuildFacadeInterfaceMethods(groups, kiotaMetadata, dtoContext, authenticationMode);
 
         var content =
 $$"""
@@ -822,6 +840,28 @@ namespace {{projectLayout.ContractsInterfacesNamespace}};
 public interface IApiFacade
 {
 {{methodDefinitions}}
+}
+""";
+
+        File.WriteAllText(filePath, content);
+    }
+
+    private static void CreateAccessTokenAccessorInterfaceFile(
+        string coreInterfacesPath,
+        SolutionProjectLayout projectLayout)
+    {
+        var filePath = Path.Combine(coreInterfacesPath, "IAccessTokenAccessor.cs");
+
+        var content =
+$$"""
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace {{projectLayout.ContractsInterfacesNamespace}};
+
+public interface IAccessTokenAccessor
+{
+    Task<string?> GetAccessTokenAsync(CancellationToken cancellationToken = default);
 }
 """;
 
@@ -873,11 +913,12 @@ public sealed partial class ApiFacade : IApiFacade
         SolutionProjectLayout projectLayout,
         ApiGroupDefinition group,
         KiotaClientMetadata kiotaMetadata,
-        DtoGenerationContext dtoContext)
+        DtoGenerationContext dtoContext,
+        AuthenticationMode authenticationMode)
     {
         var groupName = group.Name.Trim();
         var filePath = Path.Combine(infrastructureFacadesPath, $"ApiFacade.{groupName}.cs");
-        var methods = BuildFacadePartialMethods(group, kiotaMetadata, dtoContext);
+        var methods = BuildFacadePartialMethods(group, kiotaMetadata, dtoContext, authenticationMode);
 
         var content =
 $$"""
@@ -905,11 +946,12 @@ public sealed partial class ApiFacade
         SolutionProjectLayout projectLayout,
         ApiGroupDefinition group,
         KiotaClientMetadata kiotaMetadata,
-        DtoGenerationContext dtoContext)
+        DtoGenerationContext dtoContext,
+        AuthenticationMode authenticationMode)
     {
         var groupName = group.Name.Trim();
         var filePath = Path.Combine(coreInterfacesPath, $"I{groupName}Service.cs");
-        var methods = BuildServiceInterfaceMethods(group, kiotaMetadata, dtoContext);
+        var methods = BuildServiceInterfaceMethods(group, kiotaMetadata, dtoContext, authenticationMode);
 
         var content =
 $$"""
@@ -933,11 +975,12 @@ public interface I{{groupName}}Service
         SolutionProjectLayout projectLayout,
         ApiGroupDefinition group,
         KiotaClientMetadata kiotaMetadata,
-        DtoGenerationContext dtoContext)
+        DtoGenerationContext dtoContext,
+        AuthenticationMode authenticationMode)
     {
         var groupName = group.Name.Trim();
         var filePath = Path.Combine(infrastructureServicesPath, $"{groupName}Service.cs");
-        var methods = BuildServiceImplementationMethods(group, kiotaMetadata, dtoContext);
+        var methods = BuildServiceImplementationMethods(group, kiotaMetadata, dtoContext, authenticationMode);
 
         var content =
 $$"""
@@ -970,13 +1013,22 @@ private static void CreateServiceCollectionExtensionsFile(
     string infrastructureDependencyInjectionPath,
     SolutionProjectLayout projectLayout,
     IReadOnlyCollection<ApiGroupDefinition> groups,
-    KiotaClientMetadata kiotaMetadata)
+    KiotaClientMetadata kiotaMetadata,
+    AuthenticationMode authenticationMode)
     {
         var filePath = Path.Combine(infrastructureDependencyInjectionPath, "ServiceCollectionExtensions.cs");
 
         var serviceRegistrations = groups.Count == 0
             ? "        // No API groups were detected."
             : string.Join(Environment.NewLine, groups.Select(g => $"        services.AddScoped<I{g.Name}Service, {g.Name}Service>();"));
+
+        var authenticationUsing = authenticationMode == AuthenticationMode.AccessTokenAccessor
+            ? $"using {projectLayout.HttpAuthenticationNamespace};"
+            : string.Empty;
+
+        var authenticationRegistration = authenticationMode == AuthenticationMode.AccessTokenAccessor
+            ? "        services.AddScoped<IAuthenticationProvider, AccessTokenAuthenticationProvider>();"
+            : "        services.AddScoped<IAuthenticationProvider, AnonymousAuthenticationProvider>();";
 
         var content =
     $$"""
@@ -989,6 +1041,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Kiota.Abstractions;
 using Microsoft.Kiota.Abstractions.Authentication;
 using Microsoft.Kiota.Http.HttpClientLibrary;
+{{authenticationUsing}}
 
 namespace {{projectLayout.HttpDependencyInjectionNamespace}};
 
@@ -1009,7 +1062,7 @@ public static class ServiceCollectionExtensions
             client.BaseAddress = new Uri(baseUrl);
         });
 
-        services.AddScoped<IAuthenticationProvider, AnonymousAuthenticationProvider>();
+{{authenticationRegistration}}
 
         services.AddScoped<IRequestAdapter>(serviceProvider =>
         {
@@ -1106,6 +1159,53 @@ The generated facade follows the partial class pattern, allowing each API area t
         File.WriteAllText(filePath, content);
     }
 
+    private static void CreateAccessTokenAuthenticationProviderFile(
+        string infrastructureAuthenticationPath,
+        SolutionProjectLayout projectLayout)
+    {
+        var filePath = Path.Combine(infrastructureAuthenticationPath, "AccessTokenAuthenticationProvider.cs");
+
+        var content =
+$$"""
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using {{projectLayout.ContractsInterfacesNamespace}};
+using Microsoft.Kiota.Abstractions;
+using Microsoft.Kiota.Abstractions.Authentication;
+
+namespace {{projectLayout.HttpAuthenticationNamespace}};
+
+internal sealed class AccessTokenAuthenticationProvider : IAuthenticationProvider
+{
+    private readonly IAccessTokenAccessor _accessTokenAccessor;
+
+    public AccessTokenAuthenticationProvider(IAccessTokenAccessor accessTokenAccessor)
+    {
+        _accessTokenAccessor = accessTokenAccessor ?? throw new ArgumentNullException(nameof(accessTokenAccessor));
+    }
+
+    public async Task AuthenticateRequestAsync(
+        RequestInformation request,
+        Dictionary<string, object>? additionalAuthenticationContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var accessToken = await _accessTokenAccessor.GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(accessToken))
+            return;
+
+        request.Headers.TryAdd("Authorization", $"Bearer {accessToken}");
+    }
+}
+""";
+
+        File.WriteAllText(filePath, content);
+    }
+
     private static void CreateGenerationManifestFile(
         string solutionRootPath,
         ModernizationRequest request,
@@ -1190,12 +1290,16 @@ The generated facade follows the partial class pattern, allowing each API area t
             entrypoints = new
             {
                 serviceCollectionExtension = $"{projectLayout.HttpDependencyInjectionNamespace}.ServiceCollectionExtensions",
-                facadeInterface = $"{projectLayout.ContractsInterfacesNamespace}.IApiFacade"
+                facadeInterface = $"{projectLayout.ContractsInterfacesNamespace}.IApiFacade",
+                accessTokenAccessorInterface = request.AuthenticationMode == AuthenticationMode.AccessTokenAccessor
+                    ? $"{projectLayout.ContractsInterfacesNamespace}.IAccessTokenAccessor"
+                    : null
             },
             consumerGuidance = new
             {
                 suggestedReference = projectLayout.HttpProjectName,
                 addGeneratedApiMethod = "AddGeneratedApi",
+                requiresAccessTokenAccessor = request.AuthenticationMode == AuthenticationMode.AccessTokenAccessor,
                 apiGroupServices = groups
                     .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
                     .Select(x => $"I{x.Name}Service")
@@ -1231,8 +1335,8 @@ The generated facade follows the partial class pattern, allowing each API area t
             ? """
 ## Authentication Mode
 
-This module was generated expecting an access token accessor strategy in the host application.
-The next implementation phase will wire this mode into the generated HTTP layer.
+This module was generated with access token resolution delegated to the host application.
+Register an implementation of `IAccessTokenAccessor` before calling `AddGeneratedApi(baseUrl)`.
 """
             : """
 ## Authentication Mode
@@ -1240,6 +1344,10 @@ The next implementation phase will wire this mode into the generated HTTP layer.
 This module was generated using per-method token flow.
 The host application can pass tokens directly to generated facade/service methods.
 """;
+
+        var accessTokenAccessorLine = request.AuthenticationMode == AuthenticationMode.AccessTokenAccessor
+            ? $"- `{projectLayout.ContractsInterfacesNamespace}.IAccessTokenAccessor`{Environment.NewLine}"
+            : string.Empty;
 
         var content =
 $$"""
@@ -1264,7 +1372,7 @@ This package was generated in `Embedded` mode for direct incorporation into an e
 ## Main Contracts
 
 - `{{projectLayout.ContractsInterfacesNamespace}}.IApiFacade`
-{{servicesSection}}
+{{accessTokenAccessorLine}}{{servicesSection}}
 
 {{authenticationSection}}
 
@@ -1364,7 +1472,8 @@ This module follows the embedded naming convention:
     private static string BuildFacadeInterfaceMethods(
         IReadOnlyCollection<ApiGroupDefinition> groups,
         KiotaClientMetadata kiotaMetadata,
-        DtoGenerationContext dtoContext)
+        DtoGenerationContext dtoContext,
+        AuthenticationMode authenticationMode)
     {
         var methods = groups
             .SelectMany(g => g.Endpoints.Select(e => new
@@ -1380,7 +1489,7 @@ This module follows the embedded naming convention:
             .Select(x =>
             {
                 var returnType = ResolveContractReturnType(x.Group.Name, x.Endpoint, kiotaMetadata, dtoContext);
-                var parameters = BuildFacadeMethodParameters(x.Group.Name, x.Endpoint, kiotaMetadata, dtoContext);
+                var parameters = BuildFacadeMethodParameters(x.Group.Name, x.Endpoint, kiotaMetadata, dtoContext, authenticationMode);
                 var taskType = BuildTaskReturnType(returnType);
 
                 return $"    {taskType} {x.MethodName}Async({parameters});";
@@ -1392,7 +1501,8 @@ This module follows the embedded naming convention:
     private static string BuildFacadePartialMethods(
     ApiGroupDefinition group,
     KiotaClientMetadata kiotaMetadata,
-    DtoGenerationContext dtoContext)
+    DtoGenerationContext dtoContext,
+    AuthenticationMode authenticationMode)
     {
         var methods = group.Endpoints
             .Select(e => new
@@ -1406,7 +1516,7 @@ This module follows the embedded naming convention:
             .OrderBy(x => x.MethodName)
             .Select(x =>
             {
-                var parameters = BuildFacadeMethodParameters(group.Name, x.Endpoint, kiotaMetadata, dtoContext);
+                var parameters = BuildFacadeMethodParameters(group.Name, x.Endpoint, kiotaMetadata, dtoContext, authenticationMode);
                 var returnType = ResolveContractReturnType(group.Name, x.Endpoint, kiotaMetadata, dtoContext);
                 var kiotaRequestBodyType = x.Endpoint.HasRequestBody
                     ? ResolveRequestBodyType(group.Name, x.Endpoint, kiotaMetadata)
@@ -1420,7 +1530,8 @@ This module follows the embedded naming convention:
                     group.Name,
                     x.Endpoint,
                     kiotaMetadata,
-                    string.IsNullOrWhiteSpace(kiotaRequestBodyType) ? "request" : "kiotaRequest");
+                    string.IsNullOrWhiteSpace(kiotaRequestBodyType) ? "request" : "kiotaRequest",
+                    authenticationMode);
                 var taskType = BuildTaskReturnType(returnType);
                 var methodBody = BuildFacadeMethodBody(returnType, operation, kiotaCallExpression, kiotaRequestBodyType);
 
@@ -1439,7 +1550,8 @@ This module follows the embedded naming convention:
     private static string BuildServiceInterfaceMethods(
         ApiGroupDefinition group,
         KiotaClientMetadata kiotaMetadata,
-        DtoGenerationContext dtoContext)
+        DtoGenerationContext dtoContext,
+        AuthenticationMode authenticationMode)
     {
         var methods = group.Endpoints
             .Select(e => new
@@ -1454,7 +1566,7 @@ This module follows the embedded naming convention:
             .Select(x =>
             {
                 var returnType = ResolveContractReturnType(group.Name, x.Endpoint, kiotaMetadata, dtoContext);
-                var parameters = BuildServiceMethodParameters(group.Name, x.Endpoint, kiotaMetadata, dtoContext);
+                var parameters = BuildServiceMethodParameters(group.Name, x.Endpoint, kiotaMetadata, dtoContext, authenticationMode);
                 var taskType = BuildTaskReturnType(returnType);
 
                 return $"    {taskType} {x.MethodName}Async({parameters});";
@@ -1466,7 +1578,8 @@ This module follows the embedded naming convention:
     private static string BuildServiceImplementationMethods(
         ApiGroupDefinition group,
         KiotaClientMetadata kiotaMetadata,
-        DtoGenerationContext dtoContext)
+        DtoGenerationContext dtoContext,
+        AuthenticationMode authenticationMode)
     {
         var methods = group.Endpoints
             .Select(e => new
@@ -1480,7 +1593,7 @@ This module follows the embedded naming convention:
             .OrderBy(x => x.MethodName)
             .Select(x =>
             {
-                var parameters = BuildServiceMethodParameters(group.Name, x.Endpoint, kiotaMetadata, dtoContext);
+                var parameters = BuildServiceMethodParameters(group.Name, x.Endpoint, kiotaMetadata, dtoContext, authenticationMode);
                 var returnType = ResolveContractReturnType(group.Name, x.Endpoint, kiotaMetadata, dtoContext);
                 var operation = ResolveKiotaOperation(
                     group.Name,
@@ -1488,7 +1601,7 @@ This module follows the embedded naming convention:
                     kiotaMetadata,
                     allowCrossMethodPathFallback: false);
                 var requestCreationBlock = BuildRequestBodyCreationBlock(operation);
-                var facadeArguments = BuildFacadeArgumentsFromService(group.Name, x.Endpoint, kiotaMetadata);
+                var facadeArguments = BuildFacadeArgumentsFromService(group.Name, x.Endpoint, kiotaMetadata, authenticationMode);
                 var taskType = BuildTaskReturnType(returnType);
 
                 return
@@ -1507,7 +1620,8 @@ $$"""
         string groupName,
         ApiEndpointDefinition endpoint,
         KiotaClientMetadata kiotaMetadata,
-        DtoGenerationContext dtoContext)
+        DtoGenerationContext dtoContext,
+        AuthenticationMode authenticationMode)
     {
         var parameters = new List<string>();
 
@@ -1522,7 +1636,7 @@ $$"""
         AddQueryParameters(parameters, endpoint);
         AddHeaderParameters(parameters, endpoint);
 
-        if (endpoint.RequiresAuthorization)
+        if (endpoint.RequiresAuthorization && authenticationMode == AuthenticationMode.PerMethodToken)
             parameters.Add("string? accessToken = null");
 
         parameters.Add("CancellationToken cancellationToken = default");
@@ -1534,7 +1648,8 @@ $$"""
         string groupName,
         ApiEndpointDefinition endpoint,
         KiotaClientMetadata kiotaMetadata,
-        DtoGenerationContext dtoContext)
+        DtoGenerationContext dtoContext,
+        AuthenticationMode authenticationMode)
     {
         var parameters = new List<string>();
 
@@ -1549,7 +1664,7 @@ $$"""
         AddQueryParameters(parameters, endpoint);
         AddHeaderParameters(parameters, endpoint);
 
-        if (endpoint.RequiresAuthorization)
+        if (endpoint.RequiresAuthorization && authenticationMode == AuthenticationMode.PerMethodToken)
             parameters.Add("string? accessToken = null");
 
         parameters.Add("CancellationToken cancellationToken = default");
@@ -1803,7 +1918,8 @@ $$"""
     private static string BuildFacadeArgumentsFromService(
         string groupName,
         ApiEndpointDefinition endpoint,
-        KiotaClientMetadata kiotaMetadata)
+        KiotaClientMetadata kiotaMetadata,
+        AuthenticationMode authenticationMode)
     {
         var arguments = new List<string>();
 
@@ -1815,7 +1931,7 @@ $$"""
         AddQueryArguments(arguments, endpoint);
         AddHeaderArguments(arguments, endpoint);
 
-        if (endpoint.RequiresAuthorization)
+        if (endpoint.RequiresAuthorization && authenticationMode == AuthenticationMode.PerMethodToken)
             arguments.Add("accessToken");
 
         arguments.Add("cancellationToken");
@@ -1860,7 +1976,8 @@ $$"""
         string apiGroupName,
         ApiEndpointDefinition endpoint,
         KiotaClientMetadata kiotaMetadata,
-        string bodyArgumentName)
+        string bodyArgumentName,
+        AuthenticationMode authenticationMode)
     {
         var groupMetadata = ResolveKiotaGroupMetadata(
             apiGroupName,
@@ -1885,7 +2002,7 @@ $$"""
             kiotaMetadata);
 
         var asyncMethodName = GetKiotaAsyncMethodName(endpoint.Method);
-        var configBlock = BuildKiotaRequestConfiguration(endpoint);
+        var configBlock = BuildKiotaRequestConfiguration(endpoint, authenticationMode);
         var bodyArgument = endpoint.HasRequestBody ? $"{bodyArgumentName}, " : string.Empty;
 
         if (string.IsNullOrWhiteSpace(configBlock))
@@ -1939,11 +2056,13 @@ $$"""
         return chain;
     }
 
-    private static string BuildKiotaRequestConfiguration(ApiEndpointDefinition endpoint)
+    private static string BuildKiotaRequestConfiguration(
+        ApiEndpointDefinition endpoint,
+        AuthenticationMode authenticationMode)
     {
         var lines = new List<string>();
 
-        if (endpoint.RequiresAuthorization)
+        if (endpoint.RequiresAuthorization && authenticationMode == AuthenticationMode.PerMethodToken)
         {
             lines.Add("            if (!string.IsNullOrWhiteSpace(accessToken))");
             lines.Add("                config.Headers.Add(\"Authorization\", $\"Bearer {accessToken}\");");

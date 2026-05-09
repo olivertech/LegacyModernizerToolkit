@@ -154,7 +154,7 @@ public sealed class SolutionCompositionServiceTests
 
         var parameters = (string?)method!.Invoke(
             null,
-            [ "Notifications", endpoint, metadata, dtoContext ]);
+            [ "Notifications", endpoint, metadata, dtoContext, AuthenticationMode.PerMethodToken ]);
 
         Assert.Equal("int? id, CancellationToken cancellationToken = default", parameters);
     }
@@ -201,7 +201,7 @@ public sealed class SolutionCompositionServiceTests
 
         var parameters = (string?)method!.Invoke(
             null,
-            [ "Notifications", endpoint, metadata, dtoContext ]);
+            [ "Notifications", endpoint, metadata, dtoContext, AuthenticationMode.PerMethodToken ]);
 
         Assert.Equal("int? id, CancellationToken cancellationToken = default", parameters);
     }
@@ -290,10 +290,71 @@ public sealed class SolutionCompositionServiceTests
 
         var parameters = (string?)method!.Invoke(
             null,
-            [ "Reports", endpoint, metadata, dtoContext ]);
+            [ "Reports", endpoint, metadata, dtoContext, AuthenticationMode.PerMethodToken ]);
 
         Assert.Equal(
             "int? id, ReportsPostRequestBodyDto request, bool? includeArchived, string? xCorrelationId = null, string? accessToken = null, CancellationToken cancellationToken = default",
+            parameters);
+    }
+
+    [Fact]
+    public void BuildFacadeMethodParameters_OmitsAccessTokenWhenUsingAccessTokenAccessorMode()
+    {
+        var endpoint = new ApiEndpointDefinition
+        {
+            Path = "/v1/reports/{id}",
+            Method = "POST",
+            HasRequestBody = true,
+            RequiresAuthorization = true,
+            Parameters =
+            [
+                new ApiParameterDefinition
+                {
+                    Name = "id",
+                    Location = "path",
+                    Required = true,
+                    SchemaType = "integer",
+                    SchemaFormat = "int32"
+                }
+            ]
+        };
+
+        var metadata = new KiotaClientMetadata
+        {
+            Groups =
+            [
+                new KiotaGroupMetadata
+                {
+                    GroupName = "Reports",
+                    BuilderAccessExpression = "Reports",
+                    Operations =
+                    [
+                        new KiotaOperationMetadata
+                        {
+                            HttpMethod = "POST",
+                            EndpointPath = "reports/{param}",
+                            RequestBodyTypeName = "Fake.Client.Reports.ReportsPostRequestBody"
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var method = typeof(SolutionCompositionService).GetMethod(
+            "BuildFacadeMethodParameters",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        var dtoContext = CreateDtoContext();
+        AddDtoMapping(dtoContext, "Fake.Client.Reports.ReportsPostRequestBody", "ReportsPostRequestBodyDto");
+
+        var parameters = (string?)method!.Invoke(
+            null,
+            [ "Reports", endpoint, metadata, dtoContext, AuthenticationMode.AccessTokenAccessor ]);
+
+        Assert.Equal(
+            "int? id, ReportsPostRequestBodyDto request, CancellationToken cancellationToken = default",
             parameters);
     }
 
@@ -483,8 +544,12 @@ public sealed class SolutionCompositionServiceTests
                 "AlphaSquad.Lmt.Application.Http.DependencyInjection.ServiceCollectionExtensions",
                 root.GetProperty("entrypoints").GetProperty("serviceCollectionExtension").GetString());
             Assert.Equal(
+                "AlphaSquad.Lmt.Application.Contracts.Interfaces.IAccessTokenAccessor",
+                root.GetProperty("entrypoints").GetProperty("accessTokenAccessorInterface").GetString());
+            Assert.Equal(
                 "AddGeneratedApi",
                 root.GetProperty("consumerGuidance").GetProperty("addGeneratedApiMethod").GetString());
+            Assert.True(root.GetProperty("consumerGuidance").GetProperty("requiresAccessTokenAccessor").GetBoolean());
             Assert.Equal(
                 "IAuthenticationService",
                 root.GetProperty("consumerGuidance").GetProperty("apiGroupServices")[0].GetString());

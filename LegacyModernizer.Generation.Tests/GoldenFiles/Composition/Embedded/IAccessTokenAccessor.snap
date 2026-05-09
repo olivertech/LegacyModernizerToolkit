@@ -1,0 +1,9 @@
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace AlphaSquad.Lmt.Application.Contracts.Interfaces;
+
+public interface IAccessTokenAccessor
+{
+    Task<string?> GetAccessTokenAsync(CancellationToken cancellationToken = default);
+}

@@ -160,7 +160,8 @@ public sealed class SolutionCompositionGoldenTests : IDisposable
                     {
                         Path = "/v1/authentication/me",
                         Method = "GET",
-                        OperationId = "GetMe"
+                        OperationId = "GetMe",
+                        RequiresAuthorization = true
                     }
                 ]
             }
@@ -211,6 +212,14 @@ public sealed class SolutionCompositionGoldenTests : IDisposable
         GoldenFileAssert.Matches(
             Path.Combine(solution.RootPath, "src", "AlphaSquad.Lmt.Application.Contracts", "Interfaces", "IApiFacade.cs"),
             Path.Combine(goldenRoot, "IApiFacade.snap"));
+
+        GoldenFileAssert.Matches(
+            Path.Combine(solution.RootPath, "src", "AlphaSquad.Lmt.Application.Contracts", "Interfaces", "IAccessTokenAccessor.cs"),
+            Path.Combine(goldenRoot, "IAccessTokenAccessor.snap"));
+
+        GoldenFileAssert.Matches(
+            Path.Combine(solution.RootPath, "src", "AlphaSquad.Lmt.Application.Http", "DependencyInjection", "ServiceCollectionExtensions.cs"),
+            Path.Combine(goldenRoot, "ServiceCollectionExtensions.snap"));
 
         GoldenFileAssert.Matches(
             Path.Combine(solution.RootPath, "generation-manifest.json"),

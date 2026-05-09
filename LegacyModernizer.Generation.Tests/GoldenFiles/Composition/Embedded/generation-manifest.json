@@ -44,7 +44,7 @@
           "path": "/v1/authentication/me",
           "operationId": "GetMe",
           "generatedMethodName": "GETAuthenticationMe",
-          "requiresAuthorization": false,
+          "requiresAuthorization": true,
           "hasRequestBody": false,
           "kiota": {
             "methodName": "GetAsync",
