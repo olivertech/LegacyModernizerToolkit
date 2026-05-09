@@ -3,10 +3,13 @@ namespace LegacyModernizer.Web.Controllers;
 public sealed class HomeController : Controller
 {
     private readonly IGenerateModernizedClientUseCase _generateModernizedClientUseCase;
+    private readonly IDownloadTokenService _downloadTokenService;
 
-    public HomeController(IGenerateModernizedClientUseCase generateModernizedClientUseCase)
+    public HomeController(IGenerateModernizedClientUseCase generateModernizedClientUseCase,
+                          IDownloadTokenService downloadTokenService)
     {
         _generateModernizedClientUseCase = generateModernizedClientUseCase ?? throw new ArgumentNullException(nameof(generateModernizedClientUseCase));
+        _downloadTokenService = downloadTokenService ?? throw new ArgumentNullException(nameof(downloadTokenService));
     }
 
     [HttpGet]
@@ -24,16 +27,17 @@ public sealed class HomeController : Controller
 
         var request = new GenerateModernizedClientRequest
         {
-            SpecificationUrl = model.SpecificationUrl,
+            SpecificationUrl = model.ActiveSpecificationUrl,
             ProjectName = model.ProjectName,
             BaseNamespace = model.BaseNamespace,
             TargetFramework = model.TargetFramework
         };
 
-        // Chama o caso de uso para gerar o cliente modernizado
         var response = await _generateModernizedClientUseCase.ExecuteAsync(request, cancellationToken);
+        var downloadToken = response.Success && !string.IsNullOrWhiteSpace(response.PackagePath)
+            ? _downloadTokenService.IssueToken(response.PackagePath)
+            : null;
 
-        // Prepara o ViewModel para exibir os resultados
         var resultViewModel = new GenerateModernizedClientResultViewModel
         {
             Success = response.Success,
@@ -41,7 +45,7 @@ public sealed class HomeController : Controller
             ExecutionId = response.ExecutionId,
             SolutionRootPath = response.SolutionRootPath,
             PackagePath = response.PackagePath,
-            DownloadToken = response.PackagePath
+            DownloadToken = downloadToken
         };
 
         return View("Result", resultViewModel);
@@ -53,12 +57,10 @@ public sealed class HomeController : Controller
         if (string.IsNullOrWhiteSpace(token))
             return BadRequest("Invalid download token.");
 
-        if (!System.IO.File.Exists(token))
-            return NotFound("Package file was not found.");
+        if (!_downloadTokenService.TryResolvePackagePath(token, out var packagePath))
+            return NotFound("Download token was not found or has expired.");
 
-        var fileName = Path.GetFileName(token);
-        var contentType = "application/zip";
-
-        return PhysicalFile(token, contentType, fileName);
+        var fileName = Path.GetFileName(packagePath);
+        return PhysicalFile(packagePath, "application/zip", fileName);
     }
 }

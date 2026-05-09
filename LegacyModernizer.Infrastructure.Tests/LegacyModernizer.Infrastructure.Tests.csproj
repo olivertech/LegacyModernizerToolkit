@@ -19,6 +19,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\\LegacyModernizer.Web\\LegacyModernizer.Web.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Folder Include="FileSystem\" />
     <Folder Include="Http\" />
     <Folder Include="Workspace\" />

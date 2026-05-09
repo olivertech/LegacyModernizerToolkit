@@ -21,9 +21,40 @@
     </div>
 
     <div class="mb-3">
+        <label class="form-label">Specification URL Mode</label>
+        <div class="d-flex gap-4">
+            <div class="form-check">
+                <input class="form-check-input" type="radio"
+                       name="UrlMode" id="urlModeProduction" value="production"
+                       @(Model.UrlMode == "production" ? "checked" : "") />
+                <label class="form-check-label" for="urlModeProduction">
+                    Production URL
+                </label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio"
+                       name="UrlMode" id="urlModeLocalhost" value="localhost"
+                       @(Model.UrlMode == "localhost" ? "checked" : "") />
+                <label class="form-check-label" for="urlModeLocalhost">
+                    Localhost (local API)
+                </label>
+            </div>
+        </div>
+        <span asp-validation-for="UrlMode" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3" id="productionUrlPanel">
         <label asp-for="SpecificationUrl" class="form-label"></label>
-        <input asp-for="SpecificationUrl" class="form-control" />
+        <input asp-for="SpecificationUrl" class="form-control"
+               placeholder="https://api.example.com/swagger/v1/swagger.json" />
         <span asp-validation-for="SpecificationUrl" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3" id="localUrlPanel" style="display:none;">
+        <label asp-for="LocalSpecificationUrl" class="form-label"></label>
+        <input asp-for="LocalSpecificationUrl" class="form-control"
+               placeholder="https://localhost:7054/swagger/v1/swagger.json" />
+        <span asp-validation-for="LocalSpecificationUrl" class="text-danger"></span>
     </div>
 
     <div class="mb-3">
@@ -51,16 +82,27 @@
     <partial name="_ValidationScriptsPartial" />
 
     <script>
+        const productionPanel = document.getElementById('productionUrlPanel');
+        const localPanel = document.getElementById('localUrlPanel');
+        const radios = document.querySelectorAll('input[name="UrlMode"]');
+
+        function updatePanels() {
+            const selected = document.querySelector('input[name="UrlMode"]:checked')?.value;
+            const isLocal = selected === 'localhost';
+            productionPanel.style.display = isLocal ? 'none' : '';
+            localPanel.style.display = isLocal ? '' : 'none';
+        }
+
+        radios.forEach(r => r.addEventListener('change', updatePanels));
+        updatePanels();
+
         const form = document.querySelector('form');
         const button = document.getElementById('generateButton');
         const buttonText = document.getElementById('generateButtonText');
         const spinner = document.getElementById('generateButtonSpinner');
 
         form.addEventListener('submit', function () {
-            if (!form.checkValidity()) {
-                return;
-            }
-
+            if (!form.checkValidity()) return;
             button.disabled = true;
             buttonText.textContent = 'Generating...';
             spinner.classList.remove('d-none');

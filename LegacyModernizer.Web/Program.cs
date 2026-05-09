@@ -1,3 +1,5 @@
+using LegacyModernizer.Web.Security;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -5,6 +7,8 @@ builder.Services
     .AddApplication()
     .AddInfrastructure()
     .AddGeneration()
+    .AddMemoryCache(options => options.SizeLimit = 1024)
+    .AddSingleton<IDownloadTokenService, MemoryDownloadTokenService>()
     .AddControllersWithViews();
 
 var app = builder.Build();
