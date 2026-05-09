@@ -11,6 +11,35 @@ namespace LegacyModernizer.Generation.Tests.Composition;
 
 public sealed class SolutionCompositionServiceTests
 {
+    private static object ResolveProjectLayout(ModernizationRequest request)
+    {
+        var resolverType = typeof(SolutionCompositionService).Assembly.GetType(
+            "LegacyModernizer.Generation.Composition.ProjectNamingStrategyResolver");
+
+        Assert.NotNull(resolverType);
+
+        var resolveMethod = resolverType!.GetMethod(
+            "Resolve",
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+
+        Assert.NotNull(resolveMethod);
+
+        var layout = resolveMethod!.Invoke(null, [request]);
+        Assert.NotNull(layout);
+        return layout!;
+    }
+
+    private static string GetLayoutValue(object layout, string propertyName)
+    {
+        var property = layout.GetType().GetProperty(
+            propertyName,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+        Assert.NotNull(property);
+
+        return Assert.IsType<string>(property!.GetValue(layout));
+    }
+
     private static object CreateDtoContext()
     {
         var nestedType = typeof(SolutionCompositionService).GetNestedType(
@@ -40,6 +69,28 @@ public sealed class SolutionCompositionServiceTests
         var addMethod = sourceToDtoTypeName!.GetType().GetMethod("Add", [typeof(string), typeof(string)]);
         Assert.NotNull(addMethod);
         addMethod!.Invoke(sourceToDtoTypeName, [sourceTypeName, dtoTypeName]);
+    }
+
+    [Fact]
+    public void ProjectNamingStrategyResolver_UsesEmbeddedNamingConvention()
+    {
+        var request = new ModernizationRequest(
+            new SpecificationSource(SpecificationSourceType.File, Path.Combine(Path.GetTempPath(), "openapi.json")),
+            new ProjectName("AlphaSquad"),
+            new NamespaceName("AlphaSquad"),
+            "net10.0",
+            GenerationMode.Embedded,
+            AuthenticationMode.AccessTokenAccessor,
+            new EmbeddedProjectPrefix("AlphaSquad"));
+
+        var layout = ResolveProjectLayout(request);
+
+        Assert.Equal("AlphaSquad.Lmt.Application.Contracts", GetLayoutValue(layout, "ContractsProjectName"));
+        Assert.Equal("AlphaSquad.Lmt.Application.ApiClient", GetLayoutValue(layout, "ApiClientProjectName"));
+        Assert.Equal("AlphaSquad.Lmt.Application.Http", GetLayoutValue(layout, "HttpProjectName"));
+        Assert.Equal("AlphaSquad.Lmt.Application.Contracts", GetLayoutValue(layout, "ContractsNamespace"));
+        Assert.Equal("AlphaSquad.Lmt.Application.ApiClient", GetLayoutValue(layout, "ApiClientNamespace"));
+        Assert.Equal("AlphaSquad.Lmt.Application.Http", GetLayoutValue(layout, "HttpNamespace"));
     }
 
     [Fact]
@@ -332,6 +383,7 @@ public sealed class SolutionCompositionServiceTests
 
             var dtoContext = CreateDtoContext();
             AddDtoMapping(dtoContext, "Fake.Client.Models.BusinessResponse", "BusinessResponseDto");
+            var layout = ResolveProjectLayout(request);
 
             var method = typeof(SolutionCompositionService).GetMethod(
                 "CreateGenerationManifestFile",
@@ -339,7 +391,7 @@ public sealed class SolutionCompositionServiceTests
 
             Assert.NotNull(method);
 
-            method!.Invoke(null, [ tempRootPath, request, groups, metadata, dtoContext ]);
+            method!.Invoke(null, [ tempRootPath, request, layout, groups, metadata, dtoContext ]);
 
             var manifestPath = Path.Combine(tempRootPath, "generation-manifest.json");
             Assert.True(File.Exists(manifestPath));
@@ -348,6 +400,11 @@ public sealed class SolutionCompositionServiceTests
             var root = document.RootElement;
 
             Assert.Equal("ManifestSample", root.GetProperty("projectName").GetString());
+            Assert.Equal("Standalone", root.GetProperty("generationMode").GetString());
+            Assert.Equal("PerMethodToken", root.GetProperty("authenticationMode").GetString());
+            Assert.Equal("ManifestSample", root.GetProperty("solutionName").GetString());
+            Assert.Equal("ManifestSample.Core", root.GetProperty("projects").GetProperty("contracts").GetString());
+            Assert.Equal("Manifest.Sample.Core", root.GetProperty("namespaces").GetProperty("contracts").GetString());
 
             var dtoMappings = root.GetProperty("dtoMappings");
             Assert.Equal("Fake.Client.Models.BusinessResponse", dtoMappings[0].GetProperty("sourceType").GetString());
@@ -361,6 +418,76 @@ public sealed class SolutionCompositionServiceTests
             Assert.True(kiota.GetProperty("isCollectionWrapper").GetBoolean());
             Assert.Equal("Value", kiota.GetProperty("collectionPropertyName").GetString());
             Assert.Equal("List<BusinessResponseDto>?", contracts.GetProperty("returnType").GetString());
+        }
+        finally
+        {
+            if (Directory.Exists(tempRootPath))
+                Directory.Delete(tempRootPath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CreateIntegrationManifestFile_IncludesEmbeddedIntegrationMetadata()
+    {
+        var tempRootPath = Path.Combine(Path.GetTempPath(), "LegacyModernizerTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRootPath);
+
+        try
+        {
+            var request = new ModernizationRequest(
+                new SpecificationSource(SpecificationSourceType.File, Path.Combine(tempRootPath, "openapi.json")),
+                new ProjectName("AlphaSquad"),
+                new NamespaceName("AlphaSquad"),
+                "net10.0",
+                GenerationMode.Embedded,
+                AuthenticationMode.AccessTokenAccessor,
+                new EmbeddedProjectPrefix("AlphaSquad"));
+
+            var groups = new[]
+            {
+                new ApiGroupDefinition
+                {
+                    Name = "Authentication",
+                    Endpoints =
+                    [
+                        new ApiEndpointDefinition
+                        {
+                            Path = "/v1/authentication/login",
+                            Method = "POST"
+                        }
+                    ]
+                }
+            };
+
+            var layout = ResolveProjectLayout(request);
+
+            var method = typeof(SolutionCompositionService).GetMethod(
+                "CreateIntegrationManifestFile",
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.NotNull(method);
+
+            method!.Invoke(null, [ tempRootPath, request, layout, groups ]);
+
+            var manifestPath = Path.Combine(tempRootPath, "integration-manifest.json");
+            Assert.True(File.Exists(manifestPath));
+
+            using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            var root = document.RootElement;
+
+            Assert.Equal("Embedded", root.GetProperty("generationMode").GetString());
+            Assert.Equal("AccessTokenAccessor", root.GetProperty("authenticationMode").GetString());
+            Assert.Equal("AlphaSquad", root.GetProperty("projectPrefix").GetString());
+            Assert.Equal("AlphaSquad.Lmt.Application.Http", root.GetProperty("projects").GetProperty("http").GetString());
+            Assert.Equal(
+                "AlphaSquad.Lmt.Application.Http.DependencyInjection.ServiceCollectionExtensions",
+                root.GetProperty("entrypoints").GetProperty("serviceCollectionExtension").GetString());
+            Assert.Equal(
+                "AddGeneratedApi",
+                root.GetProperty("consumerGuidance").GetProperty("addGeneratedApiMethod").GetString());
+            Assert.Equal(
+                "IAuthenticationService",
+                root.GetProperty("consumerGuidance").GetProperty("apiGroupServices")[0].GetString());
         }
         finally
         {

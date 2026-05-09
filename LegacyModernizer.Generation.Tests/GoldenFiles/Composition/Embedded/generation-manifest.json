@@ -1,19 +1,19 @@
 {
   "projectName": "GoldenSample",
   "baseNamespace": "Golden.Sample",
-  "generationMode": "Standalone",
-  "authenticationMode": "PerMethodToken",
+  "generationMode": "Embedded",
+  "authenticationMode": "AccessTokenAccessor",
   "targetFramework": "net8.0",
   "solutionName": "GoldenSample",
   "projects": {
-    "contracts": "GoldenSample.Core",
-    "apiClient": "GoldenSample.ApiClient",
-    "http": "GoldenSample.Infrastructure"
+    "contracts": "AlphaSquad.Lmt.Application.Contracts",
+    "apiClient": "AlphaSquad.Lmt.Application.ApiClient",
+    "http": "AlphaSquad.Lmt.Application.Http"
   },
   "namespaces": {
-    "contracts": "Golden.Sample.Core",
-    "apiClient": "Golden.Sample.ApiClient",
-    "http": "Golden.Sample.Infrastructure"
+    "contracts": "AlphaSquad.Lmt.Application.Contracts",
+    "apiClient": "AlphaSquad.Lmt.Application.ApiClient",
+    "http": "AlphaSquad.Lmt.Application.Http"
   },
   "generatedClientRootNamespace": "Fake.Client",
   "generatedClientClassName": "ApiClient",

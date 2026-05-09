@@ -1,0 +1,26 @@
+{
+  "generationMode": "Embedded",
+  "authenticationMode": "AccessTokenAccessor",
+  "projectPrefix": "AlphaSquad",
+  "projects": {
+    "contracts": "AlphaSquad.Lmt.Application.Contracts",
+    "apiClient": "AlphaSquad.Lmt.Application.ApiClient",
+    "http": "AlphaSquad.Lmt.Application.Http"
+  },
+  "namespaces": {
+    "contracts": "AlphaSquad.Lmt.Application.Contracts",
+    "apiClient": "AlphaSquad.Lmt.Application.ApiClient",
+    "http": "AlphaSquad.Lmt.Application.Http"
+  },
+  "entrypoints": {
+    "serviceCollectionExtension": "AlphaSquad.Lmt.Application.Http.DependencyInjection.ServiceCollectionExtensions",
+    "facadeInterface": "AlphaSquad.Lmt.Application.Contracts.Interfaces.IApiFacade"
+  },
+  "consumerGuidance": {
+    "suggestedReference": "AlphaSquad.Lmt.Application.Http",
+    "addGeneratedApiMethod": "AddGeneratedApi",
+    "apiGroupServices": [
+      "IAuthenticationService"
+    ]
+  }
+}

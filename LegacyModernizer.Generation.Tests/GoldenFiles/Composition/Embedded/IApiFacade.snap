@@ -1,0 +1,12 @@
+using System.Threading;
+using System.Threading.Tasks;
+using AlphaSquad.Lmt.Application.Contracts.Dtos;
+
+namespace AlphaSquad.Lmt.Application.Contracts.Interfaces;
+
+public interface IApiFacade
+{
+    Task<UserProfileResponseDto?> GETAuthenticationMeAsync(CancellationToken cancellationToken = default);
+
+    Task<AuthResponseDto?> POSTAuthenticationLoginAsync(LoginPostRequestBodyDto request, CancellationToken cancellationToken = default);
+}

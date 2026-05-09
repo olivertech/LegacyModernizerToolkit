@@ -124,6 +124,107 @@ public sealed class SolutionCompositionGoldenTests : IDisposable
             Path.Combine(goldenRoot, "generation-manifest.json"));
     }
 
+    [Fact]
+    public async Task ComposeAsync_Embedded_GeneratesExpectedIntegrationArtifacts()
+    {
+        var generatedClientPath = Path.Combine(_tempRootPath, "generated-client-embedded");
+        Directory.CreateDirectory(generatedClientPath);
+
+        WriteFakeClient(generatedClientPath);
+
+        var workspace = CreateWorkspace();
+        var request = CreateRequest(
+            GenerationMode.Embedded,
+            AuthenticationMode.AccessTokenAccessor,
+            "AlphaSquad");
+        var artifact = new GeneratedArtifact(
+            ArtifactType.GeneratedClient,
+            new ArtifactLocation(generatedClientPath),
+            ExecutionStep.ClientGeneration);
+
+        var groups = new[]
+        {
+            new ApiGroupDefinition
+            {
+                Name = "Authentication",
+                Endpoints =
+                [
+                    new ApiEndpointDefinition
+                    {
+                        Path = "/v1/authentication/login",
+                        Method = "POST",
+                        OperationId = "Login",
+                        HasRequestBody = true
+                    },
+                    new ApiEndpointDefinition
+                    {
+                        Path = "/v1/authentication/me",
+                        Method = "GET",
+                        OperationId = "GetMe"
+                    }
+                ]
+            }
+        };
+
+        var kiotaMetadata = new KiotaClientMetadata
+        {
+            RootNamespace = "Fake.Client",
+            ClientClassName = "ApiClient",
+            Groups =
+            [
+                new KiotaGroupMetadata
+                {
+                    GroupName = "Authentication",
+                    BuilderAccessExpression = "Authentication",
+                    Operations =
+                    [
+                        new KiotaOperationMetadata
+                        {
+                            OperationId = "Login",
+                            MethodName = "PostAsync",
+                            HttpMethod = "POST",
+                            EndpointPath = "authentication/login",
+                            AccessExpression = "Login",
+                            RequestBodyTypeName = "Fake.Client.Authentication.Login.LoginPostRequestBody",
+                            ReturnTypeName = "Fake.Client.Models.AuthResponse?"
+                        },
+                        new KiotaOperationMetadata
+                        {
+                            OperationId = "GetMe",
+                            MethodName = "GetAsync",
+                            HttpMethod = "GET",
+                            EndpointPath = "authentication/me",
+                            AccessExpression = "Me",
+                            ReturnTypeName = "Fake.Client.Models.UserProfileResponse?"
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var service = new SolutionCompositionService();
+        var solution = await service.ComposeAsync(request, workspace, artifact, groups, kiotaMetadata);
+
+        var repoRoot = GoldenFileAssert.RepositoryRoot();
+        var goldenRoot = Path.Combine(repoRoot, "LegacyModernizer.Generation.Tests", "GoldenFiles", "Composition", "Embedded");
+
+        GoldenFileAssert.Matches(
+            Path.Combine(solution.RootPath, "src", "AlphaSquad.Lmt.Application.Contracts", "Interfaces", "IApiFacade.cs"),
+            Path.Combine(goldenRoot, "IApiFacade.snap"));
+
+        GoldenFileAssert.Matches(
+            Path.Combine(solution.RootPath, "generation-manifest.json"),
+            Path.Combine(goldenRoot, "generation-manifest.json"));
+
+        GoldenFileAssert.Matches(
+            Path.Combine(solution.RootPath, "integration-manifest.json"),
+            Path.Combine(goldenRoot, "integration-manifest.json"));
+
+        GoldenFileAssert.Matches(
+            Path.Combine(solution.RootPath, "INTEGRATION.md"),
+            Path.Combine(goldenRoot, "INTEGRATION.md"));
+    }
+
     private Workspace CreateWorkspace()
     {
         var rootPath = Path.Combine(_tempRootPath, "workspace");
@@ -148,7 +249,10 @@ public sealed class SolutionCompositionGoldenTests : IDisposable
         return workspace;
     }
 
-    private ModernizationRequest CreateRequest()
+    private ModernizationRequest CreateRequest(
+        GenerationMode generationMode = GenerationMode.Standalone,
+        AuthenticationMode authenticationMode = AuthenticationMode.PerMethodToken,
+        string? embeddedProjectPrefix = null)
     {
         var specificationPath = Path.Combine(_tempRootPath, "openapi.json");
         File.WriteAllText(specificationPath, "{}");
@@ -157,7 +261,12 @@ public sealed class SolutionCompositionGoldenTests : IDisposable
             new SpecificationSource(SpecificationSourceType.File, specificationPath),
             new ProjectName("GoldenSample"),
             new NamespaceName("Golden.Sample"),
-            "net8.0");
+            "net8.0",
+            generationMode,
+            authenticationMode,
+            string.IsNullOrWhiteSpace(embeddedProjectPrefix)
+                ? null
+                : new EmbeddedProjectPrefix(embeddedProjectPrefix));
     }
 
     private static void WriteFakeClient(string generatedClientPath)

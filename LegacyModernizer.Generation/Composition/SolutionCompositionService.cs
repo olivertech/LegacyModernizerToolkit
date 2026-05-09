@@ -69,9 +69,8 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
             throw new DirectoryNotFoundException($"Generated client directory was not found: {generatedClientPath}");
 
         var projectName = request.ProjectName.ToString();
-        var baseNamespace = request.BaseNamespace.ToString();
         var targetFramework = request.TargetFramework ?? "net8.0";
-        var clientClassName = $"{projectName}ApiClient";
+        var projectLayout = ProjectNamingStrategyResolver.Resolve(request);
 
         var normalizedGroups = groups
             .Where(x => !string.IsNullOrWhiteSpace(x.Name))
@@ -82,16 +81,16 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
         var dtoContext = BuildDtoGenerationContext(
             generatedClientPath,
-            baseNamespace,
+            projectLayout.ContractsNamespace,
             normalizedGroups,
             kiotaMetadata);
 
-        var solutionRootPath = Path.Combine(workspace.Paths.ComposedPath, projectName);
+        var solutionRootPath = Path.Combine(workspace.Paths.ComposedPath, projectLayout.SolutionRootFolderName);
         var srcPath = Path.Combine(solutionRootPath, "src");
 
-        var apiClientProjectPath = Path.Combine(srcPath, $"{projectName}.ApiClient");
-        var coreProjectPath = Path.Combine(srcPath, $"{projectName}.Core");
-        var infrastructureProjectPath = Path.Combine(srcPath, $"{projectName}.Infrastructure");
+        var apiClientProjectPath = Path.Combine(srcPath, projectLayout.ApiClientProjectName);
+        var coreProjectPath = Path.Combine(srcPath, projectLayout.ContractsProjectName);
+        var infrastructureProjectPath = Path.Combine(srcPath, projectLayout.HttpProjectName);
 
         var coreInterfacesPath = Path.Combine(coreProjectPath, "Interfaces");
         var coreDtosPath = Path.Combine(coreProjectPath, "Dtos");
@@ -117,10 +116,10 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
         CopyDirectory(generatedClientPath, apiClientProjectPath);
 
-        RenameKiotaClientClass(apiClientProjectPath, projectName);
+        RenameKiotaClientClass(apiClientProjectPath, projectLayout.ClientClassName);
 
         CreateProjectFiles(
-            projectName,
+            projectLayout,
             targetFramework,
             apiClientProjectPath,
             coreProjectPath,
@@ -132,43 +131,42 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
         CreateSolutionFileWithDotNetCli(
             solutionRootPath,
-            projectName,
+            projectLayout,
             coreProjectPath,
             apiClientProjectPath,
             infrastructureProjectPath);
 
         CreateApiFacadeInterfaceFile(
             coreInterfacesPath,
-            baseNamespace,
+            projectLayout,
             normalizedGroups,
             kiotaMetadata,
             dtoContext);
 
         CreateApiFacadeBaseFile(
             infrastructureFacadesPath,
-            baseNamespace,
-            clientClassName,
+            projectLayout,
             kiotaMetadata);
 
         foreach (var group in normalizedGroups)
         {
             CreateApiFacadePartialFile(
                 infrastructureFacadesPath,
-                baseNamespace,
+                projectLayout,
                 group,
                 kiotaMetadata,
                 dtoContext);
 
             CreateServiceInterfaceFile(
                 coreInterfacesPath,
-                baseNamespace,
+                projectLayout,
                 group,
                 kiotaMetadata,
                 dtoContext);
 
             CreateServiceImplementationFile(
                 infrastructureServicesPath,
-                baseNamespace,
+                projectLayout,
                 group,
                 kiotaMetadata,
                 dtoContext);
@@ -176,18 +174,18 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
         CreateDtoMapperFile(
             infrastructureMappersPath,
-            baseNamespace);
+            projectLayout);
 
         CreateServiceCollectionExtensionsFile(
             infrastructureDependencyInjectionPath,
-            baseNamespace,
-            projectName,
+            projectLayout,
             normalizedGroups,
             kiotaMetadata);
 
         CreateGenerationManifestFile(
             solutionRootPath,
             request,
+            projectLayout,
             normalizedGroups,
             kiotaMetadata,
             dtoContext);
@@ -195,13 +193,29 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         CreateReadmeFile(
             solutionRootPath,
             request,
+            projectLayout,
             normalizedGroups);
+
+        if (request.GenerationMode == GenerationMode.Embedded)
+        {
+            CreateIntegrationManifestFile(
+                solutionRootPath,
+                request,
+                projectLayout,
+                normalizedGroups);
+
+            CreateIntegrationGuideFile(
+                solutionRootPath,
+                request,
+                projectLayout,
+                normalizedGroups);
+        }
 
         var solution = new ModernizedSolution(
             request.ProjectName,
             request.BaseNamespace,
             solutionRootPath,
-            Path.Combine(solutionRootPath, $"{projectName}.sln"));
+            Path.Combine(solutionRootPath, $"{projectLayout.SolutionName}.sln"));
 
         return Task.FromResult(solution);
     }
@@ -230,23 +244,23 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
     }
 
     private static void CreateProjectFiles(
-        string projectName,
+        SolutionProjectLayout projectLayout,
         string targetFramework,
         string apiClientProjectPath,
         string coreProjectPath,
         string infrastructureProjectPath)
     {
-        CreateApiClientProjectFile(projectName, targetFramework, apiClientProjectPath);
-        CreateCoreProjectFile(projectName, targetFramework, coreProjectPath);
-        CreateInfrastructureProjectFile(projectName, targetFramework, infrastructureProjectPath);
+        CreateApiClientProjectFile(projectLayout, targetFramework, apiClientProjectPath);
+        CreateCoreProjectFile(projectLayout, targetFramework, coreProjectPath);
+        CreateInfrastructureProjectFile(projectLayout, targetFramework, infrastructureProjectPath);
     }
 
     private static void CreateApiClientProjectFile(
-        string projectName,
+        SolutionProjectLayout projectLayout,
         string targetFramework,
         string apiClientProjectPath)
     {
-        var filePath = Path.Combine(apiClientProjectPath, $"{projectName}.ApiClient.csproj");
+        var filePath = Path.Combine(apiClientProjectPath, $"{projectLayout.ApiClientProjectName}.csproj");
 
         var content =
 $$"""
@@ -275,11 +289,11 @@ $$"""
     }
 
     private static void CreateCoreProjectFile(
-        string projectName,
+        SolutionProjectLayout projectLayout,
         string targetFramework,
         string coreProjectPath)
     {
-        var filePath = Path.Combine(coreProjectPath, $"{projectName}.Core.csproj");
+        var filePath = Path.Combine(coreProjectPath, $"{projectLayout.ContractsProjectName}.csproj");
 
         var content =
     $$"""
@@ -293,7 +307,7 @@ $$"""
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\{{projectName}}.ApiClient\{{projectName}}.ApiClient.csproj" />
+    <ProjectReference Include="..\{{projectLayout.ApiClientProjectName}}\{{projectLayout.ApiClientProjectName}}.csproj" />
   </ItemGroup>
 
 </Project>
@@ -303,11 +317,11 @@ $$"""
     }
 
     private static void CreateInfrastructureProjectFile(
-            string projectName,
+            SolutionProjectLayout projectLayout,
             string targetFramework,
             string infrastructureProjectPath)
     {
-        var filePath = Path.Combine(infrastructureProjectPath, $"{projectName}.Infrastructure.csproj");
+        var filePath = Path.Combine(infrastructureProjectPath, $"{projectLayout.HttpProjectName}.csproj");
 
         var content =
 $$"""
@@ -321,8 +335,8 @@ $$"""
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\{{projectName}}.Core\{{projectName}}.Core.csproj" />
-    <ProjectReference Include="..\{{projectName}}.ApiClient\{{projectName}}.ApiClient.csproj" />
+    <ProjectReference Include="..\{{projectLayout.ContractsProjectName}}\{{projectLayout.ContractsProjectName}}.csproj" />
+    <ProjectReference Include="..\{{projectLayout.ApiClientProjectName}}\{{projectLayout.ApiClientProjectName}}.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -338,21 +352,21 @@ $$"""
 
     private static void CreateSolutionFileWithDotNetCli(
         string solutionRootPath,
-        string projectName,
+        SolutionProjectLayout projectLayout,
         string coreProjectPath,
         string apiClientProjectPath,
         string infrastructureProjectPath)
     {
         Directory.CreateDirectory(solutionRootPath);
 
-        var solutionFilePath = Path.Combine(solutionRootPath, $"{projectName}.sln");
+        var solutionFilePath = Path.Combine(solutionRootPath, $"{projectLayout.SolutionName}.sln");
 
         if (File.Exists(solutionFilePath))
             File.Delete(solutionFilePath);
 
         RunDotNetCommand(
             solutionRootPath,
-            ["new", "sln", "--name", projectName, "--output", solutionRootPath, "--format", "sln"]);
+            ["new", "sln", "--name", projectLayout.SolutionName, "--output", solutionRootPath, "--format", "sln"]);
 
         if (!File.Exists(solutionFilePath))
         {
@@ -369,15 +383,15 @@ $$"""
 
         RunDotNetCommand(
             solutionRootPath,
-            ["sln", solutionFilePath, "add", Path.Combine(coreProjectPath, $"{projectName}.Core.csproj")]);
+            ["sln", solutionFilePath, "add", Path.Combine(coreProjectPath, $"{projectLayout.ContractsProjectName}.csproj")]);
 
         RunDotNetCommand(
             solutionRootPath,
-            ["sln", solutionFilePath, "add", Path.Combine(apiClientProjectPath, $"{projectName}.ApiClient.csproj")]);
+            ["sln", solutionFilePath, "add", Path.Combine(apiClientProjectPath, $"{projectLayout.ApiClientProjectName}.csproj")]);
 
         RunDotNetCommand(
             solutionRootPath,
-            ["sln", solutionFilePath, "add", Path.Combine(infrastructureProjectPath, $"{projectName}.Infrastructure.csproj")]);
+            ["sln", solutionFilePath, "add", Path.Combine(infrastructureProjectPath, $"{projectLayout.HttpProjectName}.csproj")]);
     }
 
     private static void RunDotNetCommand(string workingDirectory, IReadOnlyList<string> arguments)
@@ -464,7 +478,7 @@ $$"""
 
     private static void CreateDtoMapperFile(
         string infrastructureMappersPath,
-        string baseNamespace)
+        SolutionProjectLayout projectLayout)
     {
         var filePath = Path.Combine(infrastructureMappersPath, "GeneratedDtoMapper.cs");
 
@@ -474,7 +488,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Text.Json;
 
-namespace {{baseNamespace}}.Infrastructure.Mappers;
+namespace {{projectLayout.HttpMappersNamespace}};
 
 internal static class GeneratedDtoMapper
 {
@@ -566,7 +580,7 @@ internal static class GeneratedDtoMapper
         {
             context.DtoFiles[$"{dtoTypeName}.cs"] =
 $$"""
-namespace {{context.BaseNamespace}}.Core.Dtos;
+namespace {{context.BaseNamespace}}.Dtos;
 
 public sealed class {{dtoTypeName}}
 {
@@ -621,7 +635,7 @@ public sealed class {{dtoTypeName}}
 
         content =
 $$"""
-namespace {{context.BaseNamespace}}.Core.Dtos;
+namespace {{context.BaseNamespace}}.Dtos;
 
 public enum {{dtoTypeName}}
 {
@@ -706,7 +720,7 @@ public enum {{dtoTypeName}}
 
         return
 $$"""
-namespace {{context.BaseNamespace}}.Core.Dtos;
+namespace {{context.BaseNamespace}}.Dtos;
 
 public sealed class {{dtoTypeName}}
 {
@@ -789,7 +803,7 @@ public sealed class {{dtoTypeName}}
 
     private static void CreateApiFacadeInterfaceFile(
         string coreInterfacesPath,
-        string baseNamespace,
+        SolutionProjectLayout projectLayout,
         IReadOnlyCollection<ApiGroupDefinition> groups,
         KiotaClientMetadata kiotaMetadata,
         DtoGenerationContext dtoContext)
@@ -801,9 +815,9 @@ public sealed class {{dtoTypeName}}
 $$"""
 using System.Threading;
 using System.Threading.Tasks;
-using {{baseNamespace}}.Core.Dtos;
+using {{projectLayout.ContractsDtosNamespace}};
 
-namespace {{baseNamespace}}.Core.Interfaces;
+namespace {{projectLayout.ContractsInterfacesNamespace}};
 
 public interface IApiFacade
 {
@@ -816,28 +830,25 @@ public interface IApiFacade
 
     private static void CreateApiFacadeBaseFile(
         string infrastructureFacadesPath,
-        string baseNamespace,
-        string clientClassName,
+        SolutionProjectLayout projectLayout,
         KiotaClientMetadata kiotaMetadata)
     {
         var filePath = Path.Combine(infrastructureFacadesPath, "ApiFacade.cs");
 
-        var clientNamespace = $"{baseNamespace}.ApiClient";
-
         var fullyQualifiedClientClassName = BuildFullyQualifiedTypeName(
-            clientNamespace,
-            clientClassName);
+            projectLayout.ApiClientNamespace,
+            projectLayout.ClientClassName);
 
-        var rootUsing = $"using {clientNamespace};";
+        var rootUsing = $"using {projectLayout.ApiClientNamespace};";
 
         var content =
 $$"""
 using System;
 using System.Net.Http;
 {{rootUsing}}
-using {{baseNamespace}}.Core.Interfaces;
+using {{projectLayout.ContractsInterfacesNamespace}};
 
-namespace {{baseNamespace}}.Infrastructure.Facades;
+namespace {{projectLayout.HttpFacadesNamespace}};
 
 public sealed partial class ApiFacade : IApiFacade
 {
@@ -859,7 +870,7 @@ public sealed partial class ApiFacade : IApiFacade
 
     private static void CreateApiFacadePartialFile(
         string infrastructureFacadesPath,
-        string baseNamespace,
+        SolutionProjectLayout projectLayout,
         ApiGroupDefinition group,
         KiotaClientMetadata kiotaMetadata,
         DtoGenerationContext dtoContext)
@@ -875,10 +886,10 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Kiota.Abstractions;
-using {{baseNamespace}}.Core.Dtos;
-using {{baseNamespace}}.Infrastructure.Mappers;
+using {{projectLayout.ContractsDtosNamespace}};
+using {{projectLayout.HttpMappersNamespace}};
 
-namespace {{baseNamespace}}.Infrastructure.Facades;
+namespace {{projectLayout.HttpFacadesNamespace}};
 
 public sealed partial class ApiFacade
 {
@@ -891,7 +902,7 @@ public sealed partial class ApiFacade
 
     private static void CreateServiceInterfaceFile(
         string coreInterfacesPath,
-        string baseNamespace,
+        SolutionProjectLayout projectLayout,
         ApiGroupDefinition group,
         KiotaClientMetadata kiotaMetadata,
         DtoGenerationContext dtoContext)
@@ -904,9 +915,9 @@ public sealed partial class ApiFacade
 $$"""
 using System.Threading;
 using System.Threading.Tasks;
-using {{baseNamespace}}.Core.Dtos;
+using {{projectLayout.ContractsDtosNamespace}};
 
-namespace {{baseNamespace}}.Core.Interfaces;
+namespace {{projectLayout.ContractsInterfacesNamespace}};
 
 public interface I{{groupName}}Service
 {
@@ -919,7 +930,7 @@ public interface I{{groupName}}Service
 
     private static void CreateServiceImplementationFile(
         string infrastructureServicesPath,
-        string baseNamespace,
+        SolutionProjectLayout projectLayout,
         ApiGroupDefinition group,
         KiotaClientMetadata kiotaMetadata,
         DtoGenerationContext dtoContext)
@@ -934,10 +945,10 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Kiota.Abstractions;
-using {{baseNamespace}}.Core.Dtos;
-using {{baseNamespace}}.Core.Interfaces;
+using {{projectLayout.ContractsDtosNamespace}};
+using {{projectLayout.ContractsInterfacesNamespace}};
 
-namespace {{baseNamespace}}.Infrastructure.Services;
+namespace {{projectLayout.HttpServicesNamespace}};
 
 public sealed class {{groupName}}Service : I{{groupName}}Service
 {
@@ -955,17 +966,13 @@ public sealed class {{groupName}}Service : I{{groupName}}Service
         File.WriteAllText(filePath, content);
     }
 
-    private static void CreateServiceCollectionExtensionsFile(
+private static void CreateServiceCollectionExtensionsFile(
     string infrastructureDependencyInjectionPath,
-    string baseNamespace,
-    string projectName,
+    SolutionProjectLayout projectLayout,
     IReadOnlyCollection<ApiGroupDefinition> groups,
     KiotaClientMetadata kiotaMetadata)
     {
         var filePath = Path.Combine(infrastructureDependencyInjectionPath, "ServiceCollectionExtensions.cs");
-
-        var clientClassName = $"{projectName}ApiClient";
-        var clientNamespace = $"{baseNamespace}.ApiClient";
 
         var serviceRegistrations = groups.Count == 0
             ? "        // No API groups were detected."
@@ -974,16 +981,16 @@ public sealed class {{groupName}}Service : I{{groupName}}Service
         var content =
     $$"""
 using System;
-using {{clientNamespace}};
-using {{baseNamespace}}.Core.Interfaces;
-using {{baseNamespace}}.Infrastructure.Facades;
-using {{baseNamespace}}.Infrastructure.Services;
+using {{projectLayout.ApiClientNamespace}};
+using {{projectLayout.ContractsInterfacesNamespace}};
+using {{projectLayout.HttpFacadesNamespace}};
+using {{projectLayout.HttpServicesNamespace}};
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Kiota.Abstractions;
 using Microsoft.Kiota.Abstractions.Authentication;
 using Microsoft.Kiota.Http.HttpClientLibrary;
 
-namespace {{baseNamespace}}.Infrastructure.DependencyInjection;
+namespace {{projectLayout.HttpDependencyInjectionNamespace}};
 
 public static class ServiceCollectionExtensions
 {
@@ -1016,10 +1023,10 @@ public static class ServiceCollectionExtensions
             };
         });
 
-        services.AddScoped<{{clientClassName}}>(serviceProvider =>
+        services.AddScoped<{{projectLayout.ClientClassName}}>(serviceProvider =>
         {
             var requestAdapter = serviceProvider.GetRequiredService<IRequestAdapter>();
-            return new {{clientClassName}}(requestAdapter);
+            return new {{projectLayout.ClientClassName}}(requestAdapter);
         });
 
         services.AddScoped<IApiFacade, ApiFacade>();
@@ -1037,6 +1044,7 @@ public static class ServiceCollectionExtensions
     private static void CreateReadmeFile(
         string solutionRootPath,
         ModernizationRequest request,
+        SolutionProjectLayout projectLayout,
         IReadOnlyCollection<ApiGroupDefinition> groups)
     {
         var projectName = request.ProjectName.ToString();
@@ -1047,6 +1055,23 @@ public static class ServiceCollectionExtensions
             : string.Join(Environment.NewLine, groups.Select(g => $"- `{g.Name}` ({g.Endpoints.Count} endpoints)"));
 
         var filePath = Path.Combine(solutionRootPath, "README.md");
+
+        var structureSection = request.GenerationMode == GenerationMode.Embedded
+            ? $$"""
+## Embedded Structure
+
+- `{{projectLayout.ContractsProjectName}}`
+- `{{projectLayout.ApiClientProjectName}}`
+- `{{projectLayout.HttpProjectName}}`
+
+This output was generated for immediate incorporation into an existing solution.
+See `INTEGRATION.md` for the recommended setup.
+"""
+            : """
+## Standalone Structure
+
+This output was generated as an autonomous solution and can be evaluated in isolation.
+""";
 
         var content =
 $$"""
@@ -1071,6 +1096,8 @@ This output represents a modernization layer over an OpenAPI/Swagger specificati
 
 `{{baseNamespace}}`
 
+{{structureSection}}
+
 ## Notes
 
 The generated facade follows the partial class pattern, allowing each API area to be maintained in a separate file.
@@ -1082,6 +1109,7 @@ The generated facade follows the partial class pattern, allowing each API area t
     private static void CreateGenerationManifestFile(
         string solutionRootPath,
         ModernizationRequest request,
+        SolutionProjectLayout projectLayout,
         IReadOnlyCollection<ApiGroupDefinition> groups,
         KiotaClientMetadata kiotaMetadata,
         DtoGenerationContext dtoContext)
@@ -1092,7 +1120,22 @@ The generated facade follows the partial class pattern, allowing each API area t
         {
             projectName = request.ProjectName.ToString(),
             baseNamespace = request.BaseNamespace.ToString(),
+            generationMode = request.GenerationMode.ToString(),
+            authenticationMode = request.AuthenticationMode.ToString(),
             targetFramework = request.TargetFramework,
+            solutionName = projectLayout.SolutionName,
+            projects = new
+            {
+                contracts = projectLayout.ContractsProjectName,
+                apiClient = projectLayout.ApiClientProjectName,
+                http = projectLayout.HttpProjectName
+            },
+            namespaces = new
+            {
+                contracts = projectLayout.ContractsNamespace,
+                apiClient = projectLayout.ApiClientNamespace,
+                http = projectLayout.HttpNamespace
+            },
             generatedClientRootNamespace = kiotaMetadata.RootNamespace,
             generatedClientClassName = kiotaMetadata.ClientClassName,
             dtoMappings = dtoContext.SourceToDtoTypeName
@@ -1115,6 +1158,124 @@ The generated facade follows the partial class pattern, allowing each API area t
             {
                 WriteIndented = true
             });
+
+        File.WriteAllText(filePath, content);
+    }
+
+    private static void CreateIntegrationManifestFile(
+        string solutionRootPath,
+        ModernizationRequest request,
+        SolutionProjectLayout projectLayout,
+        IReadOnlyCollection<ApiGroupDefinition> groups)
+    {
+        var filePath = Path.Combine(solutionRootPath, "integration-manifest.json");
+
+        var manifest = new
+        {
+            generationMode = request.GenerationMode.ToString(),
+            authenticationMode = request.AuthenticationMode.ToString(),
+            projectPrefix = request.EmbeddedProjectPrefix?.ToString(),
+            projects = new
+            {
+                contracts = projectLayout.ContractsProjectName,
+                apiClient = projectLayout.ApiClientProjectName,
+                http = projectLayout.HttpProjectName
+            },
+            namespaces = new
+            {
+                contracts = projectLayout.ContractsNamespace,
+                apiClient = projectLayout.ApiClientNamespace,
+                http = projectLayout.HttpNamespace
+            },
+            entrypoints = new
+            {
+                serviceCollectionExtension = $"{projectLayout.HttpDependencyInjectionNamespace}.ServiceCollectionExtensions",
+                facadeInterface = $"{projectLayout.ContractsInterfacesNamespace}.IApiFacade"
+            },
+            consumerGuidance = new
+            {
+                suggestedReference = projectLayout.HttpProjectName,
+                addGeneratedApiMethod = "AddGeneratedApi",
+                apiGroupServices = groups
+                    .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(x => $"I{x.Name}Service")
+                    .ToArray()
+            }
+        };
+
+        var content = System.Text.Json.JsonSerializer.Serialize(
+            manifest,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+
+        File.WriteAllText(filePath, content);
+    }
+
+    private static void CreateIntegrationGuideFile(
+        string solutionRootPath,
+        ModernizationRequest request,
+        SolutionProjectLayout projectLayout,
+        IReadOnlyCollection<ApiGroupDefinition> groups)
+    {
+        var filePath = Path.Combine(solutionRootPath, "INTEGRATION.md");
+
+        var servicesSection = groups.Count == 0
+            ? "- No grouped services were generated."
+            : string.Join(Environment.NewLine, groups
+                .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(x => $"- `I{x.Name}Service` / `{x.Name}Service`"));
+
+        var authenticationSection = request.AuthenticationMode == AuthenticationMode.AccessTokenAccessor
+            ? """
+## Authentication Mode
+
+This module was generated expecting an access token accessor strategy in the host application.
+The next implementation phase will wire this mode into the generated HTTP layer.
+"""
+            : """
+## Authentication Mode
+
+This module was generated using per-method token flow.
+The host application can pass tokens directly to generated facade/service methods.
+""";
+
+        var content =
+$$"""
+# Integration Guide
+
+This package was generated in `Embedded` mode for direct incorporation into an existing solution.
+
+## Generated Projects
+
+- `{{projectLayout.ContractsProjectName}}`
+- `{{projectLayout.ApiClientProjectName}}`
+- `{{projectLayout.HttpProjectName}}`
+
+## Recommended Integration Steps
+
+1. Add the three generated projects to the target solution.
+2. Reference `{{projectLayout.HttpProjectName}}` from the consuming application.
+3. Register the generated module with `AddGeneratedApi(baseUrl)`.
+4. Consume only service and facade contracts from `{{projectLayout.ContractsProjectName}}`.
+5. Do not reference Kiota types directly from the host application.
+
+## Main Contracts
+
+- `{{projectLayout.ContractsInterfacesNamespace}}.IApiFacade`
+{{servicesSection}}
+
+{{authenticationSection}}
+
+## Naming Convention
+
+This module follows the embedded naming convention:
+
+- `{{request.EmbeddedProjectPrefix}}.Lmt.Application.Contracts`
+- `{{request.EmbeddedProjectPrefix}}.Lmt.Application.ApiClient`
+- `{{request.EmbeddedProjectPrefix}}.Lmt.Application.Http`
+""";
 
         File.WriteAllText(filePath, content);
     }
@@ -2420,7 +2581,7 @@ $$"""
 
     private static void RenameKiotaClientClass(
         string apiClientProjectPath,
-        string projectName)
+        string clientClassName)
     {
         var oldFile = Directory
             .GetFiles(apiClientProjectPath, "ApiClient.cs", SearchOption.AllDirectories)
@@ -2430,7 +2591,7 @@ $$"""
             return;
 
         var oldClassName = "ApiClient";
-        var newClassName = $"{projectName}ApiClient";
+        var newClassName = clientClassName;
         var newFile = Path.Combine(Path.GetDirectoryName(oldFile)!, $"{newClassName}.cs");
 
         var content = File.ReadAllText(oldFile);
