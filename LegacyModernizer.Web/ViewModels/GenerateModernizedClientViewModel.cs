@@ -4,6 +4,14 @@ namespace LegacyModernizer.Web.ViewModels;
 
 public sealed class GenerateModernizedClientViewModel : IValidatableObject
 {
+    [Required]
+    [Display(Name = "Generation Mode")]
+    public GenerationMode GenerationMode { get; set; } = GenerationMode.Standalone;
+
+    [Required]
+    [Display(Name = "Authentication Mode")]
+    public AuthenticationMode AuthenticationMode { get; set; } = AuthenticationMode.PerMethodToken;
+
     [Required(ErrorMessage = "Please select a URL mode.")]
     [Display(Name = "URL Mode")]
     public string UrlMode { get; set; } = "production";
@@ -17,6 +25,9 @@ public sealed class GenerateModernizedClientViewModel : IValidatableObject
     [Display(Name = "Specification URL")]
     [Url(ErrorMessage = "Please provide a valid URL.")]
     public string? SpecificationUrl { get; set; }
+
+    [Display(Name = "Embedded Project Prefix")]
+    public string? EmbeddedProjectPrefix { get; set; }
 
     [Required(ErrorMessage = "The project name is required.")]
     [Display(Name = "Project Name")]
@@ -49,6 +60,14 @@ public sealed class GenerateModernizedClientViewModel : IValidatableObject
                 yield return new ValidationResult(
                     "The specification URL is required.",
                     [nameof(SpecificationUrl)]);
+        }
+
+        if (GenerationMode == GenerationMode.Embedded &&
+            string.IsNullOrWhiteSpace(EmbeddedProjectPrefix))
+        {
+            yield return new ValidationResult(
+                "The embedded project prefix is required when generation mode is Embedded.",
+                [nameof(EmbeddedProjectPrefix)]);
         }
     }
 }

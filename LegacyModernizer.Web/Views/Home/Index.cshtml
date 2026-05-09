@@ -11,6 +11,36 @@
     @Html.AntiForgeryToken()
 
     <div class="mb-3">
+        <label asp-for="GenerationMode" class="form-label"></label>
+        <select asp-for="GenerationMode" class="form-select" id="generationMode">
+            <option value="Standalone">Standalone</option>
+            <option value="Embedded">Embedded</option>
+        </select>
+        <span asp-validation-for="GenerationMode" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3" id="embeddedPrefixPanel" style="display:none;">
+        <label asp-for="EmbeddedProjectPrefix" class="form-label"></label>
+        <input asp-for="EmbeddedProjectPrefix" class="form-control"
+               placeholder="AlphaSquad" />
+        <div class="form-text">
+            Embedded naming preview: <code>{Prefix}.Lmt.Application.Contracts</code>,
+            <code>{Prefix}.Lmt.Application.ApiClient</code>,
+            <code>{Prefix}.Lmt.Application.Http</code>
+        </div>
+        <span asp-validation-for="EmbeddedProjectPrefix" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="AuthenticationMode" class="form-label"></label>
+        <select asp-for="AuthenticationMode" class="form-select">
+            <option value="PerMethodToken">Per Method Token</option>
+            <option value="AccessTokenAccessor">Access Token Accessor</option>
+        </select>
+        <span asp-validation-for="AuthenticationMode" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3">
         <label asp-for="TargetFramework" class="form-label"></label>
         <select asp-for="TargetFramework" class="form-select">
             <option value="net8.0">.NET 8</option>
@@ -82,9 +112,16 @@
     <partial name="_ValidationScriptsPartial" />
 
     <script>
+        const generationModeSelect = document.getElementById('generationMode');
+        const embeddedPrefixPanel = document.getElementById('embeddedPrefixPanel');
         const productionPanel = document.getElementById('productionUrlPanel');
         const localPanel = document.getElementById('localUrlPanel');
         const radios = document.querySelectorAll('input[name="UrlMode"]');
+
+        function updateGenerationModePanels() {
+            const isEmbedded = generationModeSelect?.value === 'Embedded';
+            embeddedPrefixPanel.style.display = isEmbedded ? '' : 'none';
+        }
 
         function updatePanels() {
             const selected = document.querySelector('input[name="UrlMode"]:checked')?.value;
@@ -94,6 +131,8 @@
         }
 
         radios.forEach(r => r.addEventListener('change', updatePanels));
+        generationModeSelect?.addEventListener('change', updateGenerationModePanels);
+        updateGenerationModePanels();
         updatePanels();
 
         const form = document.querySelector('form');

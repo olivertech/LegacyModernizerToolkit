@@ -50,12 +50,18 @@ public sealed class GenerateModernizedClientUseCase : IGenerateModernizedClientU
             var projectName = new ProjectName(request.ProjectName);
             // Cria os Value Objects para namespace base
             var baseNamespace = new NamespaceName(request.BaseNamespace);
+            var embeddedProjectPrefix = request.GenerationMode == GenerationMode.Embedded
+                ? new EmbeddedProjectPrefix(request.EmbeddedProjectPrefix!)
+                : null;
 
             // Cria o request de modernização agregando as informações necessárias para o processo
             var modernizationRequest = new ModernizationRequest(specificationSource,
                                                                 projectName,
                                                                 baseNamespace,
-                                                                request.TargetFramework);
+                                                                request.TargetFramework,
+                                                                request.GenerationMode,
+                                                                request.AuthenticationMode,
+                                                                embeddedProjectPrefix);
 
             // ===========================================================================================================================
             // 1 - Inicia a execução do processo de modernização, registrando o request e o estado inicial
@@ -185,5 +191,13 @@ public sealed class GenerateModernizedClientUseCase : IGenerateModernizedClientU
 
         if (string.IsNullOrWhiteSpace(request.BaseNamespace))
             throw new ArgumentException("Base namespace is required.", nameof(request.BaseNamespace));
+
+        if (request.GenerationMode == GenerationMode.Embedded &&
+            string.IsNullOrWhiteSpace(request.EmbeddedProjectPrefix))
+        {
+            throw new ArgumentException(
+                "Embedded project prefix is required when generation mode is Embedded.",
+                nameof(request.EmbeddedProjectPrefix));
+        }
     }
 }

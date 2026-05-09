@@ -9,11 +9,17 @@ public sealed record ModernizationRequest
     public ProjectName ProjectName { get; }
     public NamespaceName BaseNamespace { get; }
     public string? TargetFramework { get; }
+    public GenerationMode GenerationMode { get; }
+    public AuthenticationMode AuthenticationMode { get; }
+    public EmbeddedProjectPrefix? EmbeddedProjectPrefix { get; }
 
     public ModernizationRequest(SpecificationSource specificationSource,
                                 ProjectName projectName,
                                 NamespaceName baseNamespace,
-                                string targetFramework)
+                                string targetFramework,
+                                GenerationMode generationMode = GenerationMode.Standalone,
+                                AuthenticationMode authenticationMode = AuthenticationMode.PerMethodToken,
+                                EmbeddedProjectPrefix? embeddedProjectPrefix = null)
     {
         SpecificationSource = specificationSource ?? throw new ArgumentNullException(nameof(specificationSource));
         ProjectName = projectName ?? throw new ArgumentNullException(nameof(projectName));
@@ -23,5 +29,15 @@ public sealed record ModernizationRequest
             throw new ArgumentException("Target framework cannot be empty.", nameof(targetFramework));
 
         TargetFramework = targetFramework.Trim();
+        GenerationMode = generationMode;
+        AuthenticationMode = authenticationMode;
+        EmbeddedProjectPrefix = embeddedProjectPrefix;
+
+        if (GenerationMode == GenerationMode.Embedded && EmbeddedProjectPrefix is null)
+        {
+            throw new ArgumentException(
+                "Embedded project prefix is required when generation mode is Embedded.",
+                nameof(embeddedProjectPrefix));
+        }
     }
 }

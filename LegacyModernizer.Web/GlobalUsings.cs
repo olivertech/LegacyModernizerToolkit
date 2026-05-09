@@ -4,6 +4,7 @@ global using LegacyModernizer.Infrastructure.DependencyInjection;
 global using LegacyModernizer.Generation.DependencyInjection;
 global using LegacyModernizer.Application.Contracts.Services;
 global using LegacyModernizer.Application.DTOs.Requests;
+global using LegacyModernizer.Domain.Enums;
 global using LegacyModernizer.Web.Security;
 global using LegacyModernizer.Web.ViewModels;
 // System namespaces

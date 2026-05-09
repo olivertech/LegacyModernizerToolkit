@@ -30,7 +30,10 @@ public sealed class HomeController : Controller
             SpecificationUrl = model.ActiveSpecificationUrl,
             ProjectName = model.ProjectName,
             BaseNamespace = model.BaseNamespace,
-            TargetFramework = model.TargetFramework
+            TargetFramework = model.TargetFramework,
+            GenerationMode = model.GenerationMode,
+            AuthenticationMode = model.AuthenticationMode,
+            EmbeddedProjectPrefix = model.EmbeddedProjectPrefix
         };
 
         var response = await _generateModernizedClientUseCase.ExecuteAsync(request, cancellationToken);

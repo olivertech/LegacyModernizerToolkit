@@ -19,6 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\\LegacyModernizer.Application\\LegacyModernizer.Application.csproj" />
+    <ProjectReference Include="..\\LegacyModernizer.Domain\\LegacyModernizer.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Folder Include="Mappings\" />
     <Folder Include="Validators\" />
     <Folder Include="UseCases\" />
