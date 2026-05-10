@@ -147,7 +147,14 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         RenameKiotaClientClass(
             apiClientProjectPath,
             kiotaMetadata.ClientClassName,
-            projectLayout.ClientClassName);
+            projectLayout.ClientClassName,
+            projectLayout.ApiClientNamespace);
+
+        var effectiveClientClassName = ResolveEffectiveClientClassName(
+            apiClientProjectPath,
+            projectLayout.ApiClientNamespace,
+            projectLayout.ClientClassName,
+            kiotaMetadata.ClientClassName);
 
         CreateProjectFiles(
             projectLayout,
@@ -182,7 +189,7 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
         CreateApiFacadeBaseFile(
             infrastructureFacadesPath,
             projectLayout,
-            kiotaMetadata);
+            effectiveClientClassName);
 
         if (request.AuthenticationMode == AuthenticationMode.AccessTokenAccessor)
         {
@@ -226,7 +233,7 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
             infrastructureDependencyInjectionPath,
             projectLayout,
             normalizedGroups,
-            kiotaMetadata,
+            effectiveClientClassName,
             request.AuthenticationMode);
 
         CreateGenerationManifestFile(
@@ -921,13 +928,13 @@ public interface IAccessTokenAccessor
     private static void CreateApiFacadeBaseFile(
         string infrastructureFacadesPath,
         SolutionProjectLayout projectLayout,
-        KiotaClientMetadata kiotaMetadata)
+        string clientClassName)
     {
         var filePath = Path.Combine(infrastructureFacadesPath, "ApiFacade.cs");
 
         var fullyQualifiedClientClassName = BuildFullyQualifiedTypeName(
             projectLayout.ApiClientNamespace,
-            projectLayout.ClientClassName);
+            clientClassName);
 
         var rootUsing = $"using {projectLayout.ApiClientNamespace};";
 
@@ -1063,9 +1070,9 @@ private static void CreateServiceCollectionExtensionsFile(
     string infrastructureDependencyInjectionPath,
     SolutionProjectLayout projectLayout,
     IReadOnlyCollection<ApiGroupDefinition> groups,
-    KiotaClientMetadata kiotaMetadata,
+    string clientClassName,
     AuthenticationMode authenticationMode)
-    {
+{
         var filePath = Path.Combine(infrastructureDependencyInjectionPath, "ServiceCollectionExtensions.cs");
 
         var serviceRegistrations = groups.Count == 0
@@ -1127,10 +1134,10 @@ public static class ServiceCollectionExtensions
             };
         });
 
-        services.AddScoped<{{projectLayout.ClientClassName}}>(serviceProvider =>
+        services.AddScoped<{{clientClassName}}>(serviceProvider =>
         {
             var requestAdapter = serviceProvider.GetRequiredService<IRequestAdapter>();
-            return new {{projectLayout.ClientClassName}}(requestAdapter);
+            return new {{clientClassName}}(requestAdapter);
         });
 
         services.AddScoped<IApiFacade, ApiFacade>();
@@ -3263,10 +3270,61 @@ $$"""
         return $"global::{rootNamespace}.{typeName}";
     }
 
+    private static string ResolveEffectiveClientClassName(
+        string apiClientProjectPath,
+        string targetRootNamespace,
+        string preferredClientClassName,
+        string fallbackClientClassName)
+    {
+        if (!string.IsNullOrWhiteSpace(preferredClientClassName) &&
+            File.Exists(Path.Combine(apiClientProjectPath, $"{preferredClientClassName}.cs")))
+        {
+            return preferredClientClassName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(fallbackClientClassName) &&
+            File.Exists(Path.Combine(apiClientProjectPath, $"{fallbackClientClassName}.cs")))
+        {
+            return fallbackClientClassName;
+        }
+
+        foreach (var filePath in Directory.GetFiles(apiClientProjectPath, "*.cs", SearchOption.AllDirectories))
+        {
+            var content = File.ReadAllText(filePath);
+
+            if (!string.IsNullOrWhiteSpace(targetRootNamespace) &&
+                !content.Contains($"namespace {targetRootNamespace};", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var match = Regex.Match(
+                content,
+                @"public\s+partial\s+class\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)",
+                RegexOptions.CultureInvariant);
+
+            if (match.Success)
+            {
+                var candidate = match.Groups["name"].Value.Trim();
+
+                if (!string.IsNullOrWhiteSpace(candidate) &&
+                    candidate.EndsWith("Client", StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return !string.IsNullOrWhiteSpace(preferredClientClassName)
+            ? preferredClientClassName
+            : fallbackClientClassName;
+    }
+
     private static void RenameKiotaClientClass(
         string apiClientProjectPath,
         string originalClientClassName,
-        string targetClientClassName)
+        string targetClientClassName,
+        string targetRootNamespace)
     {
         if (string.IsNullOrWhiteSpace(apiClientProjectPath) ||
             !Directory.Exists(apiClientProjectPath) ||
@@ -3309,6 +3367,15 @@ $$"""
             $"public {oldClassName}(",
             $"public {newClassName}(");
 
+        if (!string.IsNullOrWhiteSpace(targetRootNamespace))
+        {
+            content = Regex.Replace(
+                content,
+                @"namespace\s+[A-Za-z0-9_.]+(?=\s*[;{])",
+                $"namespace {targetRootNamespace}",
+                RegexOptions.CultureInvariant);
+        }
+
         File.WriteAllText(newFile, content);
         File.Delete(oldFile);
     }
@@ -3327,6 +3394,7 @@ $$"""
         }
 
         var originalRootNamespaces = BuildOriginalApiClientNamespaceCandidates(request, kiotaMetadata)
+            .Select(candidate => ExtractApiClientNamespaceFamilyRoot(candidate) ?? candidate)
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Where(x => !x.Equals(targetRootNamespace, StringComparison.Ordinal))
             .Distinct(StringComparer.Ordinal)
@@ -3377,10 +3445,11 @@ $$"""
                     $"namespace {targetRootNamespace}.",
                     StringComparison.Ordinal);
 
-                rewrittenContent = rewrittenContent.Replace(
-                    $"namespace {originalRootNamespace};",
-                    $"namespace {targetRootNamespace};",
-                    StringComparison.Ordinal);
+                rewrittenContent = Regex.Replace(
+                    rewrittenContent,
+                    $@"namespace\s+{Regex.Escape(originalRootNamespace)}(?=\s*[;{{])",
+                    $"namespace {targetRootNamespace}",
+                    RegexOptions.CultureInvariant);
 
                 rewrittenContent = rewrittenContent.Replace(
                     $"<{originalRootNamespace}.",

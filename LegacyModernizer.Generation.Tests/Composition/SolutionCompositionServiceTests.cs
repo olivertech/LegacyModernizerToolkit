@@ -491,6 +491,66 @@ public sealed class SolutionCompositionServiceTests
     }
 
     [Fact]
+    public void RewriteKiotaClientNamespaces_RewritesBlockScopedRootNamespaceToEmbeddedNamespace()
+    {
+        var tempRoot = CreateTempDirectory();
+
+        try
+        {
+            var clientFilePath = Path.Combine(tempRoot, "AlphaSquadApiClient.cs");
+
+            File.WriteAllText(
+                clientFilePath,
+                """
+                using AlphaSquad.ApiClient.Api;
+
+                namespace AlphaSquad.ApiClient
+                {
+                    public partial class AlphaSquadApiClient
+                    {
+                        public global::AlphaSquad.ApiClient.Api.ApiRequestBuilder Api => throw null!;
+                    }
+                }
+                """);
+
+            var request = new ModernizationRequest(
+                new SpecificationSource(SpecificationSourceType.File, Path.Combine(tempRoot, "openapi.json")),
+                new ProjectName("AlphaSquad"),
+                new NamespaceName("AlphaSquad"),
+                "net10.0",
+                GenerationMode.Embedded,
+                AuthenticationMode.AccessTokenAccessor,
+                new EmbeddedProjectPrefix("AlphaSquad"));
+
+            var metadata = new KiotaClientMetadata
+            {
+                RootNamespace = "AlphaSquad.ApiClient.Api"
+            };
+
+            var method = typeof(SolutionCompositionService).GetMethod(
+                "RewriteKiotaClientNamespaces",
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.NotNull(method);
+
+            method!.Invoke(
+                null,
+                [tempRoot, request, metadata, "AlphaSquad.Lmt.Application.ApiClient"]);
+
+            var rewrittenContent = File.ReadAllText(clientFilePath);
+
+            Assert.DoesNotContain("namespace AlphaSquad.ApiClient", rewrittenContent, StringComparison.Ordinal);
+            Assert.Contains("namespace AlphaSquad.Lmt.Application.ApiClient", rewrittenContent, StringComparison.Ordinal);
+            Assert.Contains("global::AlphaSquad.Lmt.Application.ApiClient.Api.ApiRequestBuilder", rewrittenContent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public void RenameKiotaClientClass_RenamesDetectedKiotaRootClassWhenItIsNotNamedApiClient()
     {
         var tempRoot = CreateTempDirectory();
@@ -520,7 +580,7 @@ public sealed class SolutionCompositionServiceTests
 
             method!.Invoke(
                 null,
-                [tempRoot, "AlphaSquadApiClient", "AlphaSquadLmtApplicationApiClient"]);
+                [tempRoot, "AlphaSquadApiClient", "AlphaSquadLmtApplicationApiClient", "AlphaSquad.Lmt.Application.ApiClient"]);
 
             var renamedFilePath = Path.Combine(tempRoot, "AlphaSquadLmtApplicationApiClient.cs");
 
@@ -532,6 +592,44 @@ public sealed class SolutionCompositionServiceTests
             Assert.Contains("public partial class AlphaSquadLmtApplicationApiClient", renamedContent, StringComparison.Ordinal);
             Assert.Contains("public AlphaSquadLmtApplicationApiClient(object requestAdapter)", renamedContent, StringComparison.Ordinal);
             Assert.DoesNotContain("public partial class AlphaSquadApiClient", renamedContent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveEffectiveClientClassName_FallsBackToDetectedClientClassWhenPreferredNameWasNotApplied()
+    {
+        var tempRoot = CreateTempDirectory();
+
+        try
+        {
+            var clientFilePath = Path.Combine(tempRoot, "AlphaSquadApiClient.cs");
+
+            File.WriteAllText(
+                clientFilePath,
+                """
+                namespace AlphaSquad.Lmt.Application.ApiClient;
+
+                public partial class AlphaSquadApiClient
+                {
+                }
+                """);
+
+            var method = typeof(SolutionCompositionService).GetMethod(
+                "ResolveEffectiveClientClassName",
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.NotNull(method);
+
+            var resolvedName = (string?)method!.Invoke(
+                null,
+                [tempRoot, "AlphaSquad.Lmt.Application.ApiClient", "AlphaSquadLmtApplicationApiClient", "AlphaSquadApiClient"]);
+
+            Assert.Equal("AlphaSquadApiClient", resolvedName);
         }
         finally
         {
