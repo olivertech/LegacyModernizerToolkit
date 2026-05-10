@@ -1,0 +1,7 @@
+namespace AlphaSquad.Lmt.Application.Contracts.Dtos;
+
+public sealed class LoginPostRequestBodyDto
+{
+    public string? Email { get; set; }
+    public LoginPostRequestBody_providerDto Provider { get; set; }
+}

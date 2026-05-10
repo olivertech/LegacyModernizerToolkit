@@ -361,10 +361,6 @@ $$"""
 {{centralPackageManagementOptOut}}
   </PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\{{projectLayout.ApiClientProjectName}}\{{projectLayout.ApiClientProjectName}}.csproj" />
-  </ItemGroup>
-
 </Project>
 """;
 
@@ -400,6 +396,8 @@ $$"""
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="{{KiotaAbstractionsPackageVersion}}" />
+    <PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="{{KiotaHttpPackageVersion}}" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="{{MicrosoftExtensionsDependencyInjectionAbstractionsPackageVersion}}" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="{{MicrosoftExtensionsHttpPackageVersion}}" />
   </ItemGroup>
@@ -1486,7 +1484,8 @@ Before adding these projects into your host solution, check the points below:
 2. Do not rename the folders or `.csproj` files before the first successful build.
 3. Do not add only one or two projects. The three projects are required together.
 4. The consuming application should reference only `{{projectLayout.HttpProjectName}}`.
-5. `{{projectLayout.ApiClientProjectName}}` and `{{projectLayout.ContractsProjectName}}` are consumed transitively by `{{projectLayout.HttpProjectName}}`.
+5. `{{projectLayout.HttpProjectName}}` already contains direct `ProjectReference` entries to `{{projectLayout.ContractsProjectName}}` and `{{projectLayout.ApiClientProjectName}}`.
+6. If you move only one of the generated folders, the internal `ProjectReference` paths will break and the host solution will stop compiling.
 
 ## Purpose Of Each Project
 

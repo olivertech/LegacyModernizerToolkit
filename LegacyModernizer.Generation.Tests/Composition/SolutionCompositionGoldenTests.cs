@@ -218,6 +218,10 @@ public sealed class SolutionCompositionGoldenTests : IDisposable
             Path.Combine(goldenRoot, "IAccessTokenAccessor.snap"));
 
         GoldenFileAssert.Matches(
+            Path.Combine(solution.RootPath, "src", "AlphaSquad.Lmt.Application.Contracts", "Dtos", "LoginPostRequestBodyDto.cs"),
+            Path.Combine(goldenRoot, "LoginPostRequestBodyDto.snap"));
+
+        GoldenFileAssert.Matches(
             Path.Combine(solution.RootPath, "src", "AlphaSquad.Lmt.Application.Http", "DependencyInjection", "ServiceCollectionExtensions.cs"),
             Path.Combine(goldenRoot, "ServiceCollectionExtensions.snap"));
 

@@ -42,7 +42,8 @@ Before adding these projects into your host solution, check the points below:
 2. Do not rename the folders or `.csproj` files before the first successful build.
 3. Do not add only one or two projects. The three projects are required together.
 4. The consuming application should reference only `AlphaSquad.Lmt.Application.Http`.
-5. `AlphaSquad.Lmt.Application.ApiClient` and `AlphaSquad.Lmt.Application.Contracts` are consumed transitively by `AlphaSquad.Lmt.Application.Http`.
+5. `AlphaSquad.Lmt.Application.Http` already contains direct `ProjectReference` entries to `AlphaSquad.Lmt.Application.Contracts` and `AlphaSquad.Lmt.Application.ApiClient`.
+6. If you move only one of the generated folders, the internal `ProjectReference` paths will break and the host solution will stop compiling.
 
 ## Purpose Of Each Project
 
