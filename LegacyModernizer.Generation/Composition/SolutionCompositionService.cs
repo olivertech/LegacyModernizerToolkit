@@ -144,7 +144,10 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
             kiotaMetadata,
             projectLayout.ApiClientNamespace);
 
-        RenameKiotaClientClass(apiClientProjectPath, projectLayout.ClientClassName);
+        RenameKiotaClientClass(
+            apiClientProjectPath,
+            kiotaMetadata.ClientClassName,
+            projectLayout.ClientClassName);
 
         CreateProjectFiles(
             projectLayout,
@@ -3262,17 +3265,38 @@ $$"""
 
     private static void RenameKiotaClientClass(
         string apiClientProjectPath,
-        string clientClassName)
+        string originalClientClassName,
+        string targetClientClassName)
     {
+        if (string.IsNullOrWhiteSpace(apiClientProjectPath) ||
+            !Directory.Exists(apiClientProjectPath) ||
+            string.IsNullOrWhiteSpace(originalClientClassName) ||
+            string.IsNullOrWhiteSpace(targetClientClassName) ||
+            originalClientClassName.Equals(targetClientClassName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         var oldFile = Directory
-            .GetFiles(apiClientProjectPath, "ApiClient.cs", SearchOption.AllDirectories)
+            .GetFiles(apiClientProjectPath, $"{originalClientClassName}.cs", SearchOption.AllDirectories)
             .FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(oldFile))
+        {
+            oldFile = Directory
+                .GetFiles(apiClientProjectPath, "*.cs", SearchOption.AllDirectories)
+                .FirstOrDefault(file =>
+                {
+                    var content = File.ReadAllText(file);
+                    return content.Contains($"public partial class {originalClientClassName}", StringComparison.Ordinal);
+                });
+        }
 
         if (string.IsNullOrWhiteSpace(oldFile))
             return;
 
-        var oldClassName = "ApiClient";
-        var newClassName = clientClassName;
+        var oldClassName = originalClientClassName;
+        var newClassName = targetClientClassName;
         var newFile = Path.Combine(Path.GetDirectoryName(oldFile)!, $"{newClassName}.cs");
 
         var content = File.ReadAllText(oldFile);

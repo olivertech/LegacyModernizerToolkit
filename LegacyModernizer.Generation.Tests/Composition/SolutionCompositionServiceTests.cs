@@ -491,6 +491,56 @@ public sealed class SolutionCompositionServiceTests
     }
 
     [Fact]
+    public void RenameKiotaClientClass_RenamesDetectedKiotaRootClassWhenItIsNotNamedApiClient()
+    {
+        var tempRoot = CreateTempDirectory();
+
+        try
+        {
+            var originalFilePath = Path.Combine(tempRoot, "AlphaSquadApiClient.cs");
+
+            File.WriteAllText(
+                originalFilePath,
+                """
+                namespace AlphaSquad.Lmt.Application.ApiClient;
+
+                public partial class AlphaSquadApiClient
+                {
+                    public AlphaSquadApiClient(object requestAdapter)
+                    {
+                    }
+                }
+                """);
+
+            var method = typeof(SolutionCompositionService).GetMethod(
+                "RenameKiotaClientClass",
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.NotNull(method);
+
+            method!.Invoke(
+                null,
+                [tempRoot, "AlphaSquadApiClient", "AlphaSquadLmtApplicationApiClient"]);
+
+            var renamedFilePath = Path.Combine(tempRoot, "AlphaSquadLmtApplicationApiClient.cs");
+
+            Assert.False(File.Exists(originalFilePath));
+            Assert.True(File.Exists(renamedFilePath));
+
+            var renamedContent = File.ReadAllText(renamedFilePath);
+
+            Assert.Contains("public partial class AlphaSquadLmtApplicationApiClient", renamedContent, StringComparison.Ordinal);
+            Assert.Contains("public AlphaSquadLmtApplicationApiClient(object requestAdapter)", renamedContent, StringComparison.Ordinal);
+            Assert.DoesNotContain("public partial class AlphaSquadApiClient", renamedContent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public void BuildFacadeMethodBody_MapsCollectionWrapperResponsesToContractLists()
     {
         var method = typeof(SolutionCompositionService).GetMethod(
