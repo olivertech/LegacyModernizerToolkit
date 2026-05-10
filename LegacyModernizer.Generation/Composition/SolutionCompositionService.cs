@@ -203,6 +203,7 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
             CreateApiFacadePartialFile(
                 infrastructureFacadesPath,
                 projectLayout,
+                request,
                 group,
                 kiotaMetadata,
                 dtoContext,
@@ -968,6 +969,7 @@ public sealed partial class ApiFacade : IApiFacade
     private static void CreateApiFacadePartialFile(
         string infrastructureFacadesPath,
         SolutionProjectLayout projectLayout,
+        ModernizationRequest request,
         ApiGroupDefinition group,
         KiotaClientMetadata kiotaMetadata,
         DtoGenerationContext dtoContext,
@@ -975,7 +977,7 @@ public sealed partial class ApiFacade : IApiFacade
     {
         var groupName = group.Name.Trim();
         var filePath = Path.Combine(infrastructureFacadesPath, $"ApiFacade.{groupName}.cs");
-        var methods = BuildFacadePartialMethods(group, kiotaMetadata, dtoContext, authenticationMode);
+        var methods = BuildFacadePartialMethods(group, request, projectLayout, kiotaMetadata, dtoContext, authenticationMode);
 
         var content =
 $$"""
@@ -2035,6 +2037,8 @@ This module follows the embedded naming convention:
 
     private static string BuildFacadePartialMethods(
     ApiGroupDefinition group,
+    ModernizationRequest request,
+    SolutionProjectLayout projectLayout,
     KiotaClientMetadata kiotaMetadata,
     DtoGenerationContext dtoContext,
     AuthenticationMode authenticationMode)
@@ -2054,7 +2058,11 @@ This module follows the embedded naming convention:
                 var parameters = BuildFacadeMethodParameters(group.Name, x.Endpoint, kiotaMetadata, dtoContext, authenticationMode);
                 var returnType = ResolveContractReturnType(group.Name, x.Endpoint, kiotaMetadata, dtoContext);
                 var kiotaRequestBodyType = x.Endpoint.HasRequestBody
-                    ? ResolveRequestBodyType(group.Name, x.Endpoint, kiotaMetadata)
+                    ? NormalizeKiotaInternalTypeNameForGeneratedClient(
+                        ResolveRequestBodyType(group.Name, x.Endpoint, kiotaMetadata),
+                        request,
+                        kiotaMetadata,
+                        projectLayout.ApiClientNamespace)
                     : string.Empty;
                 var operation = ResolveKiotaOperation(
                     group.Name,
@@ -2306,7 +2314,9 @@ $$"""
                 "number" when schemaFormat == "double" => "double?",
                 "number" => "decimal?",
                 "boolean" => "bool?",
-                "string" when schemaFormat is "date" or "date-time" => "DateTime?",
+                "string" when schemaFormat == "uuid" => "Guid?",
+                "string" when schemaFormat == "date" => "DateTime?",
+                "string" when schemaFormat == "date-time" => "DateTimeOffset?",
                 "string" => "string",
                 _ => parameter.Required && !isQueryParameter ? "string" : "string?"
             };
@@ -2320,11 +2330,8 @@ $$"""
             name.EndsWith("size", StringComparison.OrdinalIgnoreCase))
             return "int?";
 
-        if (name.EndsWith("id", StringComparison.OrdinalIgnoreCase))
-            return "string";
-
         if (name.Contains("date", StringComparison.OrdinalIgnoreCase))
-            return "DateTime?";
+            return "DateTimeOffset?";
 
         return "string?";
     }
@@ -2626,7 +2633,7 @@ $$"""
         {
             var parameterName = ToCamelCase(NormalizeIdentifier(query.Name));
             var propertyName = NormalizeIdentifier(query.Name);
-            var assignmentValue = BuildKiotaQueryParameterAssignmentValue(parameterName, query.Name);
+            var assignmentValue = BuildKiotaQueryParameterAssignmentValue(parameterName, query);
 
             lines.Add($"            config.QueryParameters.{propertyName} = {assignmentValue};");
         }
@@ -2636,9 +2643,12 @@ $$"""
 
     private static string BuildKiotaQueryParameterAssignmentValue(
         string parameterName,
-        string originalParameterName)
+        ApiParameterDefinition parameter)
     {
-        if (originalParameterName.Contains("date", StringComparison.OrdinalIgnoreCase))
+        var schemaType = parameter.SchemaType?.Trim().ToLowerInvariant() ?? string.Empty;
+        var schemaFormat = parameter.SchemaFormat?.Trim().ToLowerInvariant() ?? string.Empty;
+
+        if (schemaType == "string" && schemaFormat == "date")
             return $"{parameterName}.HasValue ? new Microsoft.Kiota.Abstractions.Date({parameterName}.Value) : (Microsoft.Kiota.Abstractions.Date?)null";
 
         return parameterName;
@@ -3318,6 +3328,37 @@ $$"""
         return !string.IsNullOrWhiteSpace(preferredClientClassName)
             ? preferredClientClassName
             : fallbackClientClassName;
+    }
+
+    private static string NormalizeKiotaInternalTypeNameForGeneratedClient(
+        string typeName,
+        ModernizationRequest request,
+        KiotaClientMetadata kiotaMetadata,
+        string targetRootNamespace)
+    {
+        if (string.IsNullOrWhiteSpace(typeName) || string.IsNullOrWhiteSpace(targetRootNamespace))
+            return typeName;
+
+        var normalizedTypeName = typeName;
+        var originalRootNamespaces = BuildOriginalApiClientNamespaceCandidates(request, kiotaMetadata)
+            .Select(candidate => ExtractApiClientNamespaceFamilyRoot(candidate) ?? candidate)
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
+            .Distinct(StringComparer.Ordinal)
+            .OrderByDescending(candidate => candidate.Length)
+            .ToArray();
+
+        foreach (var originalRootNamespace in originalRootNamespaces)
+        {
+            if (originalRootNamespace.Equals(targetRootNamespace, StringComparison.Ordinal))
+                continue;
+
+            normalizedTypeName = normalizedTypeName.Replace(
+                originalRootNamespace,
+                targetRootNamespace,
+                StringComparison.Ordinal);
+        }
+
+        return normalizedTypeName;
     }
 
     private static void RenameKiotaClientClass(

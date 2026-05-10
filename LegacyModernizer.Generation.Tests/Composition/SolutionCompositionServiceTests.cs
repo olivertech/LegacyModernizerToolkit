@@ -639,6 +639,116 @@ public sealed class SolutionCompositionServiceTests
     }
 
     [Fact]
+    public void NormalizeKiotaInternalTypeNameForGeneratedClient_RewritesLegacyApiClientNamespaceToEmbeddedNamespace()
+    {
+        var request = new ModernizationRequest(
+            new SpecificationSource(SpecificationSourceType.File, Path.Combine(Path.GetTempPath(), "openapi.json")),
+            new ProjectName("AlphaSquad"),
+            new NamespaceName("AlphaSquad"),
+            "net10.0",
+            GenerationMode.Embedded,
+            AuthenticationMode.AccessTokenAccessor,
+            new EmbeddedProjectPrefix("AlphaSquad"));
+
+        var metadata = new KiotaClientMetadata
+        {
+            RootNamespace = "AlphaSquad.ApiClient.Api"
+        };
+
+        var method = typeof(SolutionCompositionService).GetMethod(
+            "NormalizeKiotaInternalTypeNameForGeneratedClient",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        var normalizedTypeName = (string?)method!.Invoke(
+            null,
+            [ "System.Collections.Generic.List<AlphaSquad.ApiClient.Models.ExerciseAssignmentRequest>", request, metadata, "AlphaSquad.Lmt.Application.ApiClient" ]);
+
+        Assert.Equal(
+            "System.Collections.Generic.List<AlphaSquad.Lmt.Application.ApiClient.Models.ExerciseAssignmentRequest>",
+            normalizedTypeName);
+    }
+
+    [Fact]
+    public void ResolveParameterType_UsesGuidAndDateTimeOffsetForTypedQueryParameters()
+    {
+        var method = typeof(SolutionCompositionService).GetMethod(
+            "ResolveParameterType",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        var guidType = (string?)method!.Invoke(
+            null,
+            [
+                new ApiParameterDefinition
+                {
+                    Name = "userId",
+                    Location = "query",
+                    SchemaType = "string",
+                    SchemaFormat = "uuid"
+                },
+                true
+            ]);
+
+        var dateTimeOffsetType = (string?)method!.Invoke(
+            null,
+            [
+                new ApiParameterDefinition
+                {
+                    Name = "dateFrom",
+                    Location = "query",
+                    SchemaType = "string",
+                    SchemaFormat = "date-time"
+                },
+                true
+            ]);
+
+        Assert.Equal("Guid?", guidType);
+        Assert.Equal("DateTimeOffset?", dateTimeOffsetType);
+    }
+
+    [Fact]
+    public void BuildKiotaQueryParameterAssignmentValue_UsesKiotaDateOnlyForDateSchemaOnly()
+    {
+        var method = typeof(SolutionCompositionService).GetMethod(
+            "BuildKiotaQueryParameterAssignmentValue",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        var dateAssignment = (string?)method!.Invoke(
+            null,
+            [
+                "dateFrom",
+                new ApiParameterDefinition
+                {
+                    Name = "dateFrom",
+                    Location = "query",
+                    SchemaType = "string",
+                    SchemaFormat = "date"
+                }
+            ]);
+
+        var dateTimeAssignment = (string?)method!.Invoke(
+            null,
+            [
+                "dateFrom",
+                new ApiParameterDefinition
+                {
+                    Name = "dateFrom",
+                    Location = "query",
+                    SchemaType = "string",
+                    SchemaFormat = "date-time"
+                }
+            ]);
+
+        Assert.Equal("dateFrom.HasValue ? new Microsoft.Kiota.Abstractions.Date(dateFrom.Value) : (Microsoft.Kiota.Abstractions.Date?)null", dateAssignment);
+        Assert.Equal("dateFrom", dateTimeAssignment);
+    }
+
+    [Fact]
     public void BuildFacadeMethodBody_MapsCollectionWrapperResponsesToContractLists()
     {
         var method = typeof(SolutionCompositionService).GetMethod(
