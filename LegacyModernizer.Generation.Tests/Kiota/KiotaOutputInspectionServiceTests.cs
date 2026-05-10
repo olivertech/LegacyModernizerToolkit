@@ -1,3 +1,4 @@
+using System.Reflection;
 using LegacyModernizer.Application.DTOs.Commons;
 using LegacyModernizer.Application.DTOs.Common;
 using LegacyModernizer.Domain.Entities;
@@ -351,6 +352,44 @@ public sealed class KiotaOutputInspectionServiceTests : IDisposable
 
         Assert.Equal("string?", pathParameter.TypeName);
         Assert.Equal("[new Fake.Client.Businesses.BusinessesRequestBuilderPathParameters { Id = id }]", pathParameter.AccessExpression);
+    }
+
+    [Fact]
+    public void FindByMethodForParameter_IgnoresRequestBuilderConstructors()
+    {
+        var content =
+            """
+            namespace Fake.Client.Tenants;
+
+            public class TenantsRequestBuilder
+            {
+                public global::Fake.Client.Tenants.Slug.SlugRequestBuilder BySlug(string slug) => throw null!;
+            }
+
+            namespace Fake.Client.Tenants.Slug;
+
+            public class SlugRequestBuilder
+            {
+                public SlugRequestBuilder(global::System.Collections.Generic.Dictionary<string, object> pathParameters, global::Microsoft.Kiota.Abstractions.IRequestAdapter requestAdapter)
+                {
+                }
+            }
+            """;
+
+        var method = typeof(KiotaOutputInspectionService).GetMethod(
+            "FindByMethodForParameter",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        var result = method!.Invoke(null, [content, "slug", "slug"]);
+        Assert.NotNull(result);
+
+        var methodName = (string?)result!.GetType().GetField("Item1")?.GetValue(result);
+        var parameterTypeName = (string?)result.GetType().GetField("Item2")?.GetValue(result);
+
+        Assert.Equal("BySlug", methodName);
+        Assert.Equal("string", parameterTypeName);
     }
 
     [Fact]

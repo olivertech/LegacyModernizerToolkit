@@ -207,6 +207,71 @@ public sealed class SolutionCompositionServiceTests
     }
 
     [Fact]
+    public void BuildFacadeMethodParameters_FallsBackWhenKiotaPathParameterTypeLeaksInfrastructureTypes()
+    {
+        var endpoint = new ApiEndpointDefinition
+        {
+            Path = "/v1/tenants/{slug}",
+            Method = "GET",
+            Parameters =
+            [
+                new ApiParameterDefinition
+                {
+                    Name = "slug",
+                    Location = "path",
+                    Required = true,
+                    SchemaType = "string"
+                }
+            ]
+        };
+
+        var metadata = new KiotaClientMetadata
+        {
+            Groups =
+            [
+                new KiotaGroupMetadata
+                {
+                    GroupName = "Tenants",
+                    BuilderAccessExpression = "Tenants",
+                    DefaultPathParameterTypeName = "System.Collections.Generic.Dictionary<string, object>",
+                    Operations =
+                    [
+                        new KiotaOperationMetadata
+                        {
+                            HttpMethod = "GET",
+                            EndpointPath = "tenants/{param}",
+                            ReturnTypeName = "Fake.Client.Models.TenantResponse?",
+                            PathParameters =
+                            [
+                                new KiotaPathParameterMetadata
+                                {
+                                    Name = "slug",
+                                    AccessExpression = ".BySlug(slug)",
+                                    TypeName = "Microsoft.Kiota.Abstractions.IRequestAdapter"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var method = typeof(SolutionCompositionService).GetMethod(
+            "BuildFacadeMethodParameters",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        var dtoContext = CreateDtoContext();
+
+        var parameters = (string?)method!.Invoke(
+            null,
+            [ "Tenants", endpoint, metadata, dtoContext, AuthenticationMode.AccessTokenAccessor ]);
+
+        Assert.Equal("string slug, CancellationToken cancellationToken = default", parameters);
+    }
+
+    [Fact]
     public void BuildFacadeMethodBody_WrapsIndexerCallsWithLocalObsoleteSuppression()
     {
         var method = typeof(SolutionCompositionService).GetMethod(

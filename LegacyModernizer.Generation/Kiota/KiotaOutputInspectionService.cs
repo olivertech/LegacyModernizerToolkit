@@ -15,6 +15,11 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             @"public\s+(?<type>(?:global::)?[A-Za-z0-9_.<>,\s\?\[\]]+)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*\{\s*get;\s*set;\s*\}",
             RegexOptions.Compiled | RegexOptions.Singleline);
 
+    private static readonly Regex PublicByMethodRegex =
+        new(
+            @"public\s+(?<return>(?:global::)?[A-Za-z0-9_.<>\?,\s]+)\s+(?<method>By[A-Za-z0-9_]+)\s*\(\s*(?<type>(?:global::)?[A-Za-z0-9_.<>\?,\s]+)\s+(?<parameter>[A-Za-z0-9_]+)\s*\)",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     private sealed record KiotaMethodSignature(
         string ReturnType,
         string ParametersText,
@@ -788,12 +793,11 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
         if (string.IsNullOrWhiteSpace(content))
             return null;
 
-        var byMethodMatch = System.Text.RegularExpressions.Regex.Match(
-            content,
-            @"\b(?<method>By[A-Za-z0-9_]+)\s*\(\s*(?<type>(?:global::)?[A-Za-z0-9_.<>\?,\s]+)\s+[A-Za-z0-9_]+\s*\)",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var byMethodMatch = PublicByMethodRegex.Matches(content)
+            .Cast<Match>()
+            .FirstOrDefault(match => match.Success);
 
-        if (byMethodMatch.Success)
+        if (byMethodMatch is not null)
         {
             var typeName = CleanTypeName(byMethodMatch.Groups["type"].Value);
             var methodName = byMethodMatch.Groups["method"].Value.Trim();
@@ -823,10 +827,7 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
 
         var normalizedOriginal = NormalizeIdentifier(originalParameterName);
         var normalizedParameter = NormalizeIdentifier(parameterName);
-        var matches = System.Text.RegularExpressions.Regex.Matches(
-            content,
-            @"\b(?<method>By[A-Za-z0-9_]+)\s*\(\s*(?<type>(?:global::)?[A-Za-z0-9_.<>\?,\s]+)\s+[A-Za-z0-9_]+\s*\)",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var matches = PublicByMethodRegex.Matches(content);
 
         if (matches.Count == 0)
             return null;
@@ -1115,10 +1116,47 @@ public sealed class KiotaOutputInspectionService : IKiotaOutputInspectionService
             if (tokens.Length < 2)
                 continue;
 
-            return CleanTypeName(string.Join(" ", tokens.Take(tokens.Length - 1)));
+            var parameterTypeName = CleanTypeName(string.Join(" ", tokens.Take(tokens.Length - 1)));
+            var parameterName = tokens[^1].Trim();
+
+            if (parameterName.Equals("pathParameters", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (parameterName.Equals("requestAdapter", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (IsKiotaInfrastructureType(parameterTypeName))
+                continue;
+
+            return parameterTypeName;
         }
 
         return string.Empty;
+    }
+
+    private static bool IsKiotaInfrastructureType(string typeName)
+    {
+        var cleaned = CleanTypeName(typeName)
+            .TrimEnd('?')
+            .Trim();
+
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return true;
+
+        if (cleaned.Equals("IRequestAdapter", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("RequestAdapter", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.EndsWith(".IRequestAdapter", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.EndsWith(".RequestAdapter", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("PathParameters", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.EndsWith(".PathParameters", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return cleaned.Equals("Dictionary<string, object>", StringComparison.OrdinalIgnoreCase)
+            || cleaned.Equals("IDictionary<string, object>", StringComparison.OrdinalIgnoreCase)
+            || cleaned.Equals("System.Collections.Generic.Dictionary<string, object>", StringComparison.OrdinalIgnoreCase)
+            || cleaned.Equals("System.Collections.Generic.IDictionary<string, object>", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string[] SplitMethodParameters(string parametersText)
