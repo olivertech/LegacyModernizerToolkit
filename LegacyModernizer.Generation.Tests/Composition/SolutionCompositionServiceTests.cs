@@ -71,6 +71,13 @@ public sealed class SolutionCompositionServiceTests
         addMethod!.Invoke(sourceToDtoTypeName, [sourceTypeName, dtoTypeName]);
     }
 
+    private static string CreateTempDirectory()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "LegacyModernizerTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
     [Fact]
     public void ProjectNamingStrategyResolver_UsesEmbeddedNamingConvention()
     {
@@ -421,6 +428,66 @@ public sealed class SolutionCompositionServiceTests
         Assert.Equal(
             "int? id, ReportsPostRequestBodyDto request, CancellationToken cancellationToken = default",
             parameters);
+    }
+
+    [Fact]
+    public void RewriteKiotaClientNamespaces_RewritesOldApiClientNamespaceFamilyToEmbeddedNamespace()
+    {
+        var tempRoot = CreateTempDirectory();
+
+        try
+        {
+            var clientFilePath = Path.Combine(tempRoot, "AlphaSquadLmtApplicationApiClient.cs");
+
+            File.WriteAllText(
+                clientFilePath,
+                """
+                using AlphaSquad.ApiClient.Api;
+
+                namespace AlphaSquad.ApiClient;
+
+                public partial class AlphaSquadLmtApplicationApiClient
+                {
+                    public global::AlphaSquad.ApiClient.Api.ApiRequestBuilder Api => throw null!;
+                }
+                """);
+
+            var request = new ModernizationRequest(
+                new SpecificationSource(SpecificationSourceType.File, Path.Combine(tempRoot, "openapi.json")),
+                new ProjectName("GoldenSample"),
+                new NamespaceName("Golden.Sample"),
+                "net10.0",
+                GenerationMode.Embedded,
+                AuthenticationMode.AccessTokenAccessor,
+                new EmbeddedProjectPrefix("AlphaSquad"));
+
+            var metadata = new KiotaClientMetadata
+            {
+                RootNamespace = "AlphaSquad.ApiClient.Api"
+            };
+
+            var method = typeof(SolutionCompositionService).GetMethod(
+                "RewriteKiotaClientNamespaces",
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.NotNull(method);
+
+            method!.Invoke(
+                null,
+                [tempRoot, request, metadata, "AlphaSquad.Lmt.Application.ApiClient"]);
+
+            var rewrittenContent = File.ReadAllText(clientFilePath);
+
+            Assert.DoesNotContain("AlphaSquad.ApiClient", rewrittenContent, StringComparison.Ordinal);
+            Assert.Contains("namespace AlphaSquad.Lmt.Application.ApiClient;", rewrittenContent, StringComparison.Ordinal);
+            Assert.Contains("AlphaSquad.Lmt.Application.ApiClient", rewrittenContent, StringComparison.Ordinal);
+            Assert.Contains("ApiRequestBuilder", rewrittenContent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                Directory.Delete(tempRoot, recursive: true);
+        }
     }
 
     [Fact]

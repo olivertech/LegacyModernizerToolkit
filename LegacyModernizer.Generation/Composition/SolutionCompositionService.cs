@@ -140,7 +140,8 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
         RewriteKiotaClientNamespaces(
             apiClientProjectPath,
-            kiotaMetadata.RootNamespace,
+            request,
+            kiotaMetadata,
             projectLayout.ApiClientNamespace);
 
         RenameKiotaClientClass(apiClientProjectPath, projectLayout.ClientClassName);
@@ -3291,49 +3292,126 @@ $$"""
 
     private static void RewriteKiotaClientNamespaces(
         string apiClientProjectPath,
-        string originalRootNamespace,
+        ModernizationRequest request,
+        KiotaClientMetadata kiotaMetadata,
         string targetRootNamespace)
     {
         if (string.IsNullOrWhiteSpace(apiClientProjectPath) ||
             !Directory.Exists(apiClientProjectPath) ||
-            string.IsNullOrWhiteSpace(originalRootNamespace) ||
-            string.IsNullOrWhiteSpace(targetRootNamespace) ||
-            originalRootNamespace.Equals(targetRootNamespace, StringComparison.Ordinal))
+            string.IsNullOrWhiteSpace(targetRootNamespace))
         {
             return;
         }
+
+        var originalRootNamespaces = BuildOriginalApiClientNamespaceCandidates(request, kiotaMetadata)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Where(x => !x.Equals(targetRootNamespace, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .OrderByDescending(x => x.Length)
+            .ToArray();
+
+        if (originalRootNamespaces.Length == 0)
+            return;
 
         foreach (var filePath in Directory.GetFiles(apiClientProjectPath, "*.cs", SearchOption.AllDirectories))
         {
             var content = File.ReadAllText(filePath);
 
-            if (string.IsNullOrWhiteSpace(content) ||
-                !content.Contains(originalRootNamespace, StringComparison.Ordinal))
+            if (string.IsNullOrWhiteSpace(content))
             {
                 continue;
             }
 
-            content = content.Replace(
-                $"global::{originalRootNamespace}",
-                $"global::{targetRootNamespace}",
-                StringComparison.Ordinal);
+            var rewrittenContent = content;
 
-            content = content.Replace(
-                $"using {originalRootNamespace}",
-                $"using {targetRootNamespace}",
-                StringComparison.Ordinal);
+            foreach (var originalRootNamespace in originalRootNamespaces)
+            {
+                if (!rewrittenContent.Contains(originalRootNamespace, StringComparison.Ordinal))
+                    continue;
 
-            content = content.Replace(
-                $"namespace {originalRootNamespace}",
-                $"namespace {targetRootNamespace}",
-                StringComparison.Ordinal);
+                rewrittenContent = rewrittenContent.Replace(
+                    $"global::{originalRootNamespace}.",
+                    $"global::{targetRootNamespace}.",
+                    StringComparison.Ordinal);
 
-            content = content.Replace(
-                originalRootNamespace,
-                targetRootNamespace,
-                StringComparison.Ordinal);
+                rewrittenContent = rewrittenContent.Replace(
+                    $"global::{originalRootNamespace}",
+                    $"global::{targetRootNamespace}",
+                    StringComparison.Ordinal);
 
-            File.WriteAllText(filePath, content);
+                rewrittenContent = rewrittenContent.Replace(
+                    $"using {originalRootNamespace}.",
+                    $"using {targetRootNamespace}.",
+                    StringComparison.Ordinal);
+
+                rewrittenContent = rewrittenContent.Replace(
+                    $"using {originalRootNamespace};",
+                    $"using {targetRootNamespace};",
+                    StringComparison.Ordinal);
+
+                rewrittenContent = rewrittenContent.Replace(
+                    $"namespace {originalRootNamespace}.",
+                    $"namespace {targetRootNamespace}.",
+                    StringComparison.Ordinal);
+
+                rewrittenContent = rewrittenContent.Replace(
+                    $"namespace {originalRootNamespace};",
+                    $"namespace {targetRootNamespace};",
+                    StringComparison.Ordinal);
+
+                rewrittenContent = rewrittenContent.Replace(
+                    $"<{originalRootNamespace}.",
+                    $"<{targetRootNamespace}.",
+                    StringComparison.Ordinal);
+
+                rewrittenContent = rewrittenContent.Replace(
+                    $"({originalRootNamespace}.",
+                    $"({targetRootNamespace}.",
+                    StringComparison.Ordinal);
+            }
+
+            if (!rewrittenContent.Equals(content, StringComparison.Ordinal))
+                File.WriteAllText(filePath, rewrittenContent);
         }
+    }
+
+    private static IReadOnlyCollection<string> BuildOriginalApiClientNamespaceCandidates(
+        ModernizationRequest request,
+        KiotaClientMetadata kiotaMetadata)
+    {
+        var candidates = new HashSet<string>(StringComparer.Ordinal)
+        {
+            request.ProjectName + ".ApiClient",
+            request.BaseNamespace + ".ApiClient"
+        };
+
+        if (request.EmbeddedProjectPrefix is not null)
+            candidates.Add($"{request.EmbeddedProjectPrefix}.ApiClient");
+
+        if (!string.IsNullOrWhiteSpace(kiotaMetadata.RootNamespace))
+        {
+            candidates.Add(kiotaMetadata.RootNamespace);
+
+            var familyRoot = ExtractApiClientNamespaceFamilyRoot(kiotaMetadata.RootNamespace);
+
+            if (!string.IsNullOrWhiteSpace(familyRoot))
+                candidates.Add(familyRoot);
+        }
+
+        return candidates;
+    }
+
+    private static string ExtractApiClientNamespaceFamilyRoot(string namespaceName)
+    {
+        if (string.IsNullOrWhiteSpace(namespaceName))
+            return string.Empty;
+
+        var marker = ".ApiClient";
+        var index = namespaceName.IndexOf(marker, StringComparison.Ordinal);
+
+        if (index < 0)
+            return string.Empty;
+
+        return namespaceName[..(index + marker.Length)];
     }
 }
