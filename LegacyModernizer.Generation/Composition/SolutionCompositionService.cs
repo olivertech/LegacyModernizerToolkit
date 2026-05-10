@@ -1602,9 +1602,10 @@ dotnet restore
 
 This step helps surface package conflicts before the first full build.
 
-## Step 4 - Reference The HTTP Project From The Consuming Application
+## Step 4 - Reference The Generated Projects From The Consuming Application
 
-The host application usually needs to reference only the HTTP project directly, because it already depends on `Contracts` and `ApiClient`.
+The host application must reference the HTTP project directly.
+If the host application will implement `IAccessTokenAccessor`, consume DTOs directly, or use public interfaces declared in `Contracts`, it should also reference the `Contracts` project explicitly.
 
 Typical consuming applications:
 
@@ -1618,11 +1619,13 @@ If the host project is `src/{{sampleHostProjectName}}\{{sampleHostProjectName}}.
 
 ```powershell
 dotnet add .\src\{{sampleHostProjectName}}\{{sampleHostProjectName}}.csproj reference .\src\{{projectLayout.HttpProjectName}}\{{projectLayout.HttpProjectName}}.csproj
+dotnet add .\src\{{sampleHostProjectName}}\{{sampleHostProjectName}}.csproj reference .\src\{{projectLayout.ContractsProjectName}}\{{projectLayout.ContractsProjectName}}.csproj
 ```
 
 Important:
 
 - add the reference to `{{projectLayout.HttpProjectName}}`
+- add the reference to `{{projectLayout.ContractsProjectName}}` when the host project implements `IAccessTokenAccessor` or consumes DTOs/interfaces directly
 - do not add a direct reference from the host project to `{{projectLayout.ApiClientProjectName}}`
 - do not inject Kiota builders directly into controllers, pages or use cases
 
@@ -1766,6 +1769,12 @@ If your team prefers to keep `AccessTokenAccessor` in its own file, keep the cla
 ```csharp
 builder.Services.AddScoped<IAccessTokenAccessor, AccessTokenAccessor>();
 ```
+
+Important:
+
+- `AccessTokenAccessor` is compiled inside the host project, not inside `{{projectLayout.HttpProjectName}}`
+- because of that, the host project must be able to resolve `{{projectLayout.ContractsInterfacesNamespace}}`
+- for clarity and predictability, keep the direct reference from the host project to `{{projectLayout.ContractsProjectName}}` whenever you implement `IAccessTokenAccessor`
 
 ## Step 8 - Consume Only The Generated Contracts And Services
 
@@ -3125,6 +3134,9 @@ $$"""
             cleaned.Equals("decimal", StringComparison.OrdinalIgnoreCase) ||
             cleaned.Equals("Guid", StringComparison.OrdinalIgnoreCase) ||
             cleaned.Equals("DateTime", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("DateTimeOffset", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("DateOnly", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("TimeOnly", StringComparison.OrdinalIgnoreCase) ||
             cleaned.Equals("Date", StringComparison.OrdinalIgnoreCase) ||
             cleaned.Equals("TimeSpan", StringComparison.OrdinalIgnoreCase) ||
             cleaned.Equals("byte[]", StringComparison.OrdinalIgnoreCase) ||

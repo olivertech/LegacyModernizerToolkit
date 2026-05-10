@@ -149,9 +149,10 @@ dotnet restore
 
 This step helps surface package conflicts before the first full build.
 
-## Step 4 - Reference The HTTP Project From The Consuming Application
+## Step 4 - Reference The Generated Projects From The Consuming Application
 
-The host application usually needs to reference only the HTTP project directly, because it already depends on `Contracts` and `ApiClient`.
+The host application must reference the HTTP project directly.
+If the host application will implement `IAccessTokenAccessor`, consume DTOs directly, or use public interfaces declared in `Contracts`, it should also reference the `Contracts` project explicitly.
 
 Typical consuming applications:
 
@@ -165,11 +166,13 @@ If the host project is `src/AlphaSquad.Web\AlphaSquad.Web.csproj`, run:
 
 ```powershell
 dotnet add .\src\AlphaSquad.Web\AlphaSquad.Web.csproj reference .\src\AlphaSquad.Lmt.Application.Http\AlphaSquad.Lmt.Application.Http.csproj
+dotnet add .\src\AlphaSquad.Web\AlphaSquad.Web.csproj reference .\src\AlphaSquad.Lmt.Application.Contracts\AlphaSquad.Lmt.Application.Contracts.csproj
 ```
 
 Important:
 
 - add the reference to `AlphaSquad.Lmt.Application.Http`
+- add the reference to `AlphaSquad.Lmt.Application.Contracts` when the host project implements `IAccessTokenAccessor` or consumes DTOs/interfaces directly
 - do not add a direct reference from the host project to `AlphaSquad.Lmt.Application.ApiClient`
 - do not inject Kiota builders directly into controllers, pages or use cases
 
@@ -348,6 +351,12 @@ If your team prefers to keep `AccessTokenAccessor` in its own file, keep the cla
 ```csharp
 builder.Services.AddScoped<IAccessTokenAccessor, AccessTokenAccessor>();
 ```
+
+Important:
+
+- `AccessTokenAccessor` is compiled inside the host project, not inside `AlphaSquad.Lmt.Application.Http`
+- because of that, the host project must be able to resolve `AlphaSquad.Lmt.Application.Contracts.Interfaces`
+- for clarity and predictability, keep the direct reference from the host project to `AlphaSquad.Lmt.Application.Contracts` whenever you implement `IAccessTokenAccessor`
 
 ## Step 8 - Consume Only The Generated Contracts And Services
 

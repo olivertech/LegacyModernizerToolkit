@@ -748,6 +748,72 @@ public sealed class SolutionCompositionServiceTests
         Assert.Equal("dateFrom", dateTimeAssignment);
     }
 
+    [Theory]
+    [InlineData("DateTimeOffset?", "DateTimeOffset?")]
+    [InlineData("DateOnly?", "DateOnly?")]
+    [InlineData("TimeOnly?", "TimeOnly?")]
+    public void MapKiotaTypeToContractType_KeepsSpecialFrameworkValueTypesAsPrimitiveContracts(
+        string sourceType,
+        string expectedType)
+    {
+        var dtoContext = CreateDtoContext();
+
+        var method = typeof(SolutionCompositionService).GetMethod(
+            "MapKiotaTypeToContractType",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        var mappedType = (string?)method!.Invoke(
+            null,
+            [sourceType, dtoContext]);
+
+        Assert.Equal(expectedType, mappedType);
+
+        var sourceToDtoTypeName = dtoContext.GetType()
+            .GetProperty("SourceToDtoTypeName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
+            .GetValue(dtoContext);
+
+        var countProperty = sourceToDtoTypeName!.GetType().GetProperty("Count");
+        Assert.NotNull(countProperty);
+        Assert.Equal(0, (int)countProperty!.GetValue(sourceToDtoTypeName)!);
+    }
+
+    [Theory]
+    [InlineData("DateTimeOffset?")]
+    [InlineData("DateOnly?")]
+    [InlineData("TimeOnly?")]
+    public void EnsureDtoTypeRegistered_DoesNotGenerateDtosForSpecialFrameworkValueTypes(string sourceType)
+    {
+        var dtoContext = CreateDtoContext();
+
+        var method = typeof(SolutionCompositionService).GetMethod(
+            "EnsureDtoTypeRegistered",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        method!.Invoke(
+            null,
+            [dtoContext, sourceType]);
+
+        var sourceToDtoTypeName = dtoContext.GetType()
+            .GetProperty("SourceToDtoTypeName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
+            .GetValue(dtoContext);
+
+        var dtoFiles = dtoContext.GetType()
+            .GetProperty("DtoFiles", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
+            .GetValue(dtoContext);
+
+        var countProperty = sourceToDtoTypeName!.GetType().GetProperty("Count");
+        var dtoFilesCountProperty = dtoFiles!.GetType().GetProperty("Count");
+
+        Assert.NotNull(countProperty);
+        Assert.NotNull(dtoFilesCountProperty);
+        Assert.Equal(0, (int)countProperty!.GetValue(sourceToDtoTypeName)!);
+        Assert.Equal(0, (int)dtoFilesCountProperty!.GetValue(dtoFiles)!);
+    }
+
     [Fact]
     public void BuildFacadeMethodBody_MapsCollectionWrapperResponsesToContractLists()
     {
