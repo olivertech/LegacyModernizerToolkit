@@ -222,6 +222,14 @@ public sealed class SolutionCompositionGoldenTests : IDisposable
             Path.Combine(goldenRoot, "ServiceCollectionExtensions.snap"));
 
         GoldenFileAssert.Matches(
+            Path.Combine(solution.RootPath, "src", "AlphaSquad.Lmt.Application.ApiClient", "AlphaSquad.Lmt.Application.ApiClient.csproj"),
+            Path.Combine(goldenRoot, "AlphaSquad.Lmt.Application.ApiClient.csproj.snap"));
+
+        GoldenFileAssert.Matches(
+            Path.Combine(solution.RootPath, "src", "AlphaSquad.Lmt.Application.Http", "AlphaSquad.Lmt.Application.Http.csproj"),
+            Path.Combine(goldenRoot, "AlphaSquad.Lmt.Application.Http.csproj.snap"));
+
+        GoldenFileAssert.Matches(
             Path.Combine(solution.RootPath, "generation-manifest.json"),
             Path.Combine(goldenRoot, "generation-manifest.json"));
 

@@ -19,11 +19,25 @@
 
     @if (!string.IsNullOrWhiteSpace(Model.DownloadToken))
     {
-        <a asp-action="Download"
-           asp-route-token="@Model.DownloadToken"
-           class="btn btn-success">
-            Download ZIP
-        </a>
+        <div class="result-actions">
+            <a asp-action="Download"
+               asp-route-token="@Model.DownloadToken"
+               class="btn btn-success">
+                Download ZIP
+            </a>
+
+            <a asp-action="Index" class="btn btn-secondary">
+                Back
+            </a>
+        </div>
+    }
+    else
+    {
+        <div class="result-actions">
+            <a asp-action="Index" class="btn btn-secondary">
+                Back
+            </a>
+        </div>
     }
 }
 else
@@ -36,6 +50,10 @@ else
     {
         <p><strong>Execution Id:</strong> @Model.ExecutionId</p>
     }
-}
 
-<a asp-action="Index" class="btn btn-secondary mt-3">Back</a>
+    <div class="result-actions">
+        <a asp-action="Index" class="btn btn-secondary">
+            Back
+        </a>
+    </div>
+}

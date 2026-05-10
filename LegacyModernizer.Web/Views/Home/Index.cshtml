@@ -16,6 +16,9 @@
             <option value="Standalone">Standalone</option>
             <option value="Embedded">Embedded</option>
         </select>
+        <div class="form-text field-help">
+            Define se o Toolkit vai gerar uma solution autônoma para uso isolado ou um módulo incorporável para entrar em uma solution já existente.
+        </div>
         <span asp-validation-for="GenerationMode" class="text-danger"></span>
     </div>
 
@@ -23,6 +26,10 @@
         <label asp-for="EmbeddedProjectPrefix" class="form-label"></label>
         <input asp-for="EmbeddedProjectPrefix" class="form-control"
                placeholder="AlphaSquad" />
+        <div class="form-text">
+            Informa o nome base do projeto legado que vai receber os projetos gerados.
+            Esse valor é usado para compor nomes como <code>AlphaSquad.Lmt.Application.Contracts</code>.
+        </div>
         <div class="form-text">
             Embedded naming preview: <code>{Prefix}.Lmt.Application.Contracts</code>,
             <code>{Prefix}.Lmt.Application.ApiClient</code>,
@@ -37,6 +44,9 @@
             <option value="PerMethodToken">Per Method Token</option>
             <option value="AccessTokenAccessor">Access Token Accessor</option>
         </select>
+        <div class="form-text field-help">
+            Define se o token será passado explicitamente nos métodos gerados ou resolvido internamente por um <code>IAccessTokenAccessor</code> na aplicação hospedeira.
+        </div>
         <span asp-validation-for="AuthenticationMode" class="text-danger"></span>
     </div>
 
@@ -47,6 +57,9 @@
             <option value="net9.0">.NET 9</option>
             <option value="net10.0">.NET 10</option>
         </select>
+        <div class="form-text field-help">
+            Define o framework alvo dos projetos gerados e influencia os arquivos <code>.csproj</code> criados pelo Toolkit.
+        </div>
         <span asp-validation-for="TargetFramework" class="text-danger"></span>
     </div>
 
@@ -70,6 +83,9 @@
                 </label>
             </div>
         </div>
+        <div class="form-text field-help">
+            Escolhe se a specification OpenAPI será lida de uma URL de ambiente publicado ou de uma API local em execução no seu localhost.
+        </div>
         <span asp-validation-for="UrlMode" class="text-danger"></span>
     </div>
 
@@ -77,6 +93,9 @@
         <label asp-for="SpecificationUrl" class="form-label"></label>
         <input asp-for="SpecificationUrl" class="form-control"
                placeholder="https://api.example.com/swagger/v1/swagger.json" />
+        <div class="form-text field-help">
+            URL pública da specification Swagger/OpenAPI que será usada como contrato de entrada para gerar o client e a solução final.
+        </div>
         <span asp-validation-for="SpecificationUrl" class="text-danger"></span>
     </div>
 
@@ -84,18 +103,27 @@
         <label asp-for="LocalSpecificationUrl" class="form-label"></label>
         <input asp-for="LocalSpecificationUrl" class="form-control"
                placeholder="https://localhost:7054/swagger/v1/swagger.json" />
+        <div class="form-text field-help">
+            URL local da specification Swagger/OpenAPI, usada quando a API ainda está em desenvolvimento na sua máquina.
+        </div>
         <span asp-validation-for="LocalSpecificationUrl" class="text-danger"></span>
     </div>
 
     <div class="mb-3">
         <label asp-for="ProjectName" class="form-label"></label>
         <input asp-for="ProjectName" class="form-control" />
+        <div class="form-text field-help">
+            Nome lógico da solução gerada. Ele é usado para nomear a solution, a pasta raiz de saída e, no modo standalone, os nomes dos projetos e do pacote ZIP final.
+        </div>
         <span asp-validation-for="ProjectName" class="text-danger"></span>
     </div>
 
     <div class="mb-3">
         <label asp-for="BaseNamespace" class="form-label"></label>
         <input asp-for="BaseNamespace" class="form-control" />
+        <div class="form-text field-help">
+            Namespace base usado na geração dos contratos, DTOs e projetos no modo standalone. No modo embedded, ele perde protagonismo porque os namespaces passam a seguir o padrão <code>{Prefix}.Lmt.Application.*</code>.
+        </div>
         <span asp-validation-for="BaseNamespace" class="text-danger"></span>
     </div>
 

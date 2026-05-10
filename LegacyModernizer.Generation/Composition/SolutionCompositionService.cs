@@ -5,6 +5,15 @@
 /// </summary>
 public sealed class SolutionCompositionService : ISolutionCompositionService
 {
+    private const string KiotaAbstractionsPackageVersion = "1.22.1";
+    private const string KiotaHttpPackageVersion = "1.22.1";
+    private const string KiotaSerializationJsonPackageVersion = "1.22.1";
+    private const string KiotaSerializationTextPackageVersion = "1.22.1";
+    private const string KiotaSerializationFormPackageVersion = "1.22.1";
+    private const string KiotaSerializationMultipartPackageVersion = "1.22.1";
+    private const string MicrosoftExtensionsDependencyInjectionAbstractionsPackageVersion = "10.0.6";
+    private const string MicrosoftExtensionsHttpPackageVersion = "10.0.6";
+
     private static readonly System.Text.RegularExpressions.Regex DtoPropertyRegex =
         new(
             @"public\s+(?<type>(?:global::)?[A-Za-z0-9_.<>,\s\?\[\]]+)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*\{\s*get;\s*set;\s*\}",
@@ -133,6 +142,7 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
         CreateProjectFiles(
             projectLayout,
+            request.GenerationMode,
             targetFramework,
             apiClientProjectPath,
             coreProjectPath,
@@ -273,22 +283,27 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
     private static void CreateProjectFiles(
         SolutionProjectLayout projectLayout,
+        GenerationMode generationMode,
         string targetFramework,
         string apiClientProjectPath,
         string coreProjectPath,
         string infrastructureProjectPath)
     {
-        CreateApiClientProjectFile(projectLayout, targetFramework, apiClientProjectPath);
-        CreateCoreProjectFile(projectLayout, targetFramework, coreProjectPath);
-        CreateInfrastructureProjectFile(projectLayout, targetFramework, infrastructureProjectPath);
+        CreateApiClientProjectFile(projectLayout, generationMode, targetFramework, apiClientProjectPath);
+        CreateCoreProjectFile(projectLayout, generationMode, targetFramework, coreProjectPath);
+        CreateInfrastructureProjectFile(projectLayout, generationMode, targetFramework, infrastructureProjectPath);
     }
 
     private static void CreateApiClientProjectFile(
         SolutionProjectLayout projectLayout,
+        GenerationMode generationMode,
         string targetFramework,
         string apiClientProjectPath)
     {
         var filePath = Path.Combine(apiClientProjectPath, $"{projectLayout.ApiClientProjectName}.csproj");
+        var centralPackageManagementOptOut = generationMode == GenerationMode.Embedded
+            ? "    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>"
+            : string.Empty;
 
         var content =
 $$"""
@@ -299,15 +314,16 @@ $$"""
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+{{centralPackageManagementOptOut}}
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.*" />
-    <PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="1.*" />
-    <PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="1.*" />
-    <PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="1.*" />
-    <PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="1.*" />
-    <PackageReference Include="Microsoft.Kiota.Serialization.Multipart" Version="1.*" />
+    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="{{KiotaAbstractionsPackageVersion}}" />
+    <PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="{{KiotaHttpPackageVersion}}" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="{{KiotaSerializationJsonPackageVersion}}" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="{{KiotaSerializationTextPackageVersion}}" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="{{KiotaSerializationFormPackageVersion}}" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Multipart" Version="{{KiotaSerializationMultipartPackageVersion}}" />
   </ItemGroup>
 
 </Project>
@@ -318,10 +334,14 @@ $$"""
 
     private static void CreateCoreProjectFile(
         SolutionProjectLayout projectLayout,
+        GenerationMode generationMode,
         string targetFramework,
         string coreProjectPath)
     {
         var filePath = Path.Combine(coreProjectPath, $"{projectLayout.ContractsProjectName}.csproj");
+        var centralPackageManagementOptOut = generationMode == GenerationMode.Embedded
+            ? "    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>"
+            : string.Empty;
 
         var content =
     $$"""
@@ -332,6 +352,7 @@ $$"""
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+{{centralPackageManagementOptOut}}
   </PropertyGroup>
 
   <ItemGroup>
@@ -346,10 +367,14 @@ $$"""
 
     private static void CreateInfrastructureProjectFile(
             SolutionProjectLayout projectLayout,
+            GenerationMode generationMode,
             string targetFramework,
             string infrastructureProjectPath)
     {
         var filePath = Path.Combine(infrastructureProjectPath, $"{projectLayout.HttpProjectName}.csproj");
+        var centralPackageManagementOptOut = generationMode == GenerationMode.Embedded
+            ? "    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>"
+            : string.Empty;
 
         var content =
 $$"""
@@ -360,6 +385,7 @@ $$"""
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+{{centralPackageManagementOptOut}}
   </PropertyGroup>
 
   <ItemGroup>
@@ -368,8 +394,8 @@ $$"""
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.*" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="8.*" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="{{MicrosoftExtensionsDependencyInjectionAbstractionsPackageVersion}}" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="{{MicrosoftExtensionsHttpPackageVersion}}" />
   </ItemGroup>
 
 </Project>
@@ -1364,6 +1390,74 @@ The host application can pass tokens directly to generated facade/service method
             ? $"- `{projectLayout.ContractsInterfacesNamespace}.IAccessTokenAccessor`{Environment.NewLine}"
             : string.Empty;
 
+        var authenticationRegistrationSection = request.AuthenticationMode == AuthenticationMode.AccessTokenAccessor
+            ? $$"""
+## Authentication Setup
+
+This output was generated with `AccessTokenAccessor` mode.
+That means the host application must provide an implementation of:
+
+- `{{projectLayout.ContractsInterfacesNamespace}}.IAccessTokenAccessor`
+
+### Where to create it
+
+Create the implementation inside the consuming application project.
+
+Examples:
+
+- `src/{{request.EmbeddedProjectPrefix}}.Admin/Security/AccessTokenAccessor.cs`
+- `src/{{request.EmbeddedProjectPrefix}}.Web/Security/AccessTokenAccessor.cs`
+- `src/{{request.EmbeddedProjectPrefix}}.App/Authentication/AccessTokenAccessor.cs`
+
+### Example implementation
+
+```csharp
+using System.Threading;
+using System.Threading.Tasks;
+using {{projectLayout.ContractsInterfacesNamespace}};
+
+namespace {{request.EmbeddedProjectPrefix}}.Admin.Security;
+
+public sealed class AccessTokenAccessor : IAccessTokenAccessor
+{
+    public Task<string?> GetAccessTokenAsync(CancellationToken cancellationToken = default)
+    {
+        // Replace this with the real token source used by your application.
+        // Examples:
+        // - HttpContext session
+        // - authentication cookie
+        // - token cache
+        // - secure local storage
+        return Task.FromResult<string?>("your-access-token");
+    }
+}
+```
+
+### Where to register it
+
+Register this implementation in the startup file of the consuming application.
+
+Examples:
+
+- `Program.cs`
+- `Startup.cs`
+
+```csharp
+using {{projectLayout.ContractsInterfacesNamespace}};
+using {{request.EmbeddedProjectPrefix}}.Admin.Security;
+
+builder.Services.AddScoped<IAccessTokenAccessor, AccessTokenAccessor>();
+```
+"""
+            : """
+## Authentication Setup
+
+This output was generated with `PerMethodToken` mode.
+That means the consuming application can pass the bearer token directly into the generated methods that require authorization.
+
+In this mode, no access token accessor implementation is required.
+""";
+
         var content =
 $$"""
 # Integration Guide
@@ -1376,20 +1470,194 @@ This package was generated in `Embedded` mode for direct incorporation into an e
 - `{{projectLayout.ApiClientProjectName}}`
 - `{{projectLayout.HttpProjectName}}`
 
-## Recommended Integration Steps
+These projects are usually located inside the generated package under:
 
-1. Add the three generated projects to the target solution.
-2. Reference `{{projectLayout.HttpProjectName}}` from the consuming application.
-3. Register the generated module with `AddGeneratedApi(baseUrl)`.
-4. Consume only service and facade contracts from `{{projectLayout.ContractsProjectName}}`.
-5. Do not reference Kiota types directly from the host application.
+```text
+src/
+  {{projectLayout.ContractsProjectName}}
+  {{projectLayout.ApiClientProjectName}}
+  {{projectLayout.HttpProjectName}}
+```
+
+## Purpose Of Each Project
+
+### `{{projectLayout.ContractsProjectName}}`
+
+Contains the public contracts that the host application should reference directly:
+
+- DTOs
+- `IApiFacade`
+{{accessTokenAccessorLine}}{{servicesSection}}
+
+### `{{projectLayout.ApiClientProjectName}}`
+
+Contains the raw `Kiota` client generated from the OpenAPI specification.
+
+This project exists as a technical dependency and should not be consumed directly by pages, controllers, view models or application use cases.
+
+### `{{projectLayout.HttpProjectName}}`
+
+Contains the implementation layer:
+
+- facades
+- services
+- mappers
+- dependency injection bootstrap
+- generated authentication support
+
+## Step 1 - Add The Generated Projects To Your Existing Solution
+
+Open a terminal in the root folder of the host solution and add the generated projects to the `.sln`.
+
+The generated projects already include explicit package versions and opt out of central package version management in `Embedded` mode.
+This is intentional, so the imported module can compile more predictably even when the host solution has its own package policy.
+
+Example commands:
+
+```powershell
+dotnet sln add .\src\{{projectLayout.ContractsProjectName}}\{{projectLayout.ContractsProjectName}}.csproj
+dotnet sln add .\src\{{projectLayout.ApiClientProjectName}}\{{projectLayout.ApiClientProjectName}}.csproj
+dotnet sln add .\src\{{projectLayout.HttpProjectName}}\{{projectLayout.HttpProjectName}}.csproj
+```
+
+If you prefer, you can also add them through Visual Studio:
+
+1. Right click the solution.
+2. Choose `Add > Existing Project`.
+3. Select the three generated `.csproj` files.
+
+### Important note about packages
+
+When these projects are copied into another solution, the package references should remain explicit inside the generated `.csproj` files.
+If your host solution enforces a custom package policy, review these versions before changing them:
+
+- `Microsoft.Kiota.*`
+- `Microsoft.Extensions.DependencyInjection.Abstractions`
+- `Microsoft.Extensions.Http`
+
+## Step 2 - Reference The HTTP Project From The Consuming Application
+
+The host application usually needs to reference only the HTTP project directly, because it already depends on `Contracts` and `ApiClient`.
+
+Typical consuming applications:
+
+- MVC / Razor project
+- Admin dashboard
+- Web API that orchestrates another API
+- MAUI host project
+- Blazor host project
+
+Example command:
+
+```powershell
+dotnet add .\src\YourHostProject\YourHostProject.csproj reference .\src\{{projectLayout.HttpProjectName}}\{{projectLayout.HttpProjectName}}.csproj
+```
+
+## Step 3 - Register The Generated Module In Dependency Injection
+
+In the startup file of the host application, register the generated module using:
+
+- `{{projectLayout.HttpDependencyInjectionNamespace}}.ServiceCollectionExtensions`
+- method: `AddGeneratedApi(baseUrl)`
+
+Typical files:
+
+- `Program.cs`
+- `Startup.cs`
+
+Example:
+
+```csharp
+using {{projectLayout.HttpDependencyInjectionNamespace}};
+
+builder.Services.AddGeneratedApi("https://api.example.com");
+```
+
+If your API base URL comes from configuration, prefer something like:
+
+```csharp
+using {{projectLayout.HttpDependencyInjectionNamespace}};
+
+var apiBaseUrl = builder.Configuration["Apis:MainApi:BaseUrl"]
+                 ?? throw new InvalidOperationException("API base URL was not configured.");
+
+builder.Services.AddGeneratedApi(apiBaseUrl);
+```
+
+{{authenticationRegistrationSection}}
+
+## Step 4 - Consume Only The Generated Contracts And Services
+
+After registration, the consuming application should request dependencies from DI using the generated interfaces.
+
+Prefer using:
+
+- `{{projectLayout.ContractsInterfacesNamespace}}.IApiFacade`
+{{accessTokenAccessorLine}}{{servicesSection}}
+
+Do not consume:
+
+- raw Kiota request builders
+- Kiota models directly in pages or controllers
+- `{{projectLayout.ApiClientProjectName}}` as a public API surface
+
+## Step 5 - Example Of Consumption In The Host Application
+
+### Example in a controller or page model
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+
+public sealed class DashboardController : Controller
+{
+    private readonly IAuthenticationService _authenticationService;
+
+    public DashboardController(IAuthenticationService authenticationService)
+    {
+        _authenticationService = authenticationService;
+    }
+
+    public async Task<IActionResult> Index(CancellationToken cancellationToken)
+    {
+        var result = await _authenticationService.GETAuthenticationMeAsync(cancellationToken);
+        return View(result);
+    }
+}
+```
+
+### Important rule
+
+The host application should depend on service and facade contracts, not on Kiota internals.
+
+## Step 6 - Validate The Integration
+
+After adding the projects and registering DI, run:
+
+```powershell
+dotnet build
+```
+
+If the host application already has tests, also run:
+
+```powershell
+dotnet test
+```
 
 ## Main Contracts
 
 - `{{projectLayout.ContractsInterfacesNamespace}}.IApiFacade`
 {{accessTokenAccessorLine}}{{servicesSection}}
 
-{{authenticationSection}}
+## Troubleshooting
+
+If the integration does not work as expected, verify these points first:
+
+1. The three generated projects were added to the target solution.
+2. The consuming application references `{{projectLayout.HttpProjectName}}`.
+3. `AddGeneratedApi(baseUrl)` was registered in startup.
+4. The API base URL is correct and reachable.
+5. If using `AccessTokenAccessor`, the implementation is registered in DI.
+6. The host application is consuming `Contracts` interfaces instead of Kiota classes.
 
 ## Naming Convention
 
