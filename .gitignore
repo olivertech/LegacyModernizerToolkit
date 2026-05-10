@@ -364,3 +364,4 @@ FodyWeavers.xsd
 /.dotnet
 /LegacyModernizerToolkit.zip
 /.dotnet-cli/.dotnet
+/.dotnet-home/.dotnet
