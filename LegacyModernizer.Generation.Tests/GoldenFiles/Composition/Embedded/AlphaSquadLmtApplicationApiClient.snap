@@ -1,0 +1,5 @@
+namespace AlphaSquad.Lmt.Application.ApiClient;
+
+public partial class AlphaSquadLmtApplicationApiClient
+{
+}

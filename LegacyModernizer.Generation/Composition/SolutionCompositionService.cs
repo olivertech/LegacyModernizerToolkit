@@ -138,6 +138,11 @@ public sealed class SolutionCompositionService : ISolutionCompositionService
 
         CopyDirectory(generatedClientPath, apiClientProjectPath);
 
+        RewriteKiotaClientNamespaces(
+            apiClientProjectPath,
+            kiotaMetadata.RootNamespace,
+            projectLayout.ApiClientNamespace);
+
         RenameKiotaClientClass(apiClientProjectPath, projectLayout.ClientClassName);
 
         CreateProjectFiles(
@@ -3282,5 +3287,53 @@ $$"""
 
         File.WriteAllText(newFile, content);
         File.Delete(oldFile);
+    }
+
+    private static void RewriteKiotaClientNamespaces(
+        string apiClientProjectPath,
+        string originalRootNamespace,
+        string targetRootNamespace)
+    {
+        if (string.IsNullOrWhiteSpace(apiClientProjectPath) ||
+            !Directory.Exists(apiClientProjectPath) ||
+            string.IsNullOrWhiteSpace(originalRootNamespace) ||
+            string.IsNullOrWhiteSpace(targetRootNamespace) ||
+            originalRootNamespace.Equals(targetRootNamespace, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        foreach (var filePath in Directory.GetFiles(apiClientProjectPath, "*.cs", SearchOption.AllDirectories))
+        {
+            var content = File.ReadAllText(filePath);
+
+            if (string.IsNullOrWhiteSpace(content) ||
+                !content.Contains(originalRootNamespace, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            content = content.Replace(
+                $"global::{originalRootNamespace}",
+                $"global::{targetRootNamespace}",
+                StringComparison.Ordinal);
+
+            content = content.Replace(
+                $"using {originalRootNamespace}",
+                $"using {targetRootNamespace}",
+                StringComparison.Ordinal);
+
+            content = content.Replace(
+                $"namespace {originalRootNamespace}",
+                $"namespace {targetRootNamespace}",
+                StringComparison.Ordinal);
+
+            content = content.Replace(
+                originalRootNamespace,
+                targetRootNamespace,
+                StringComparison.Ordinal);
+
+            File.WriteAllText(filePath, content);
+        }
     }
 }
